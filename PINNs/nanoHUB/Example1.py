@@ -37,9 +37,12 @@ f = lambda x, Psi: torch.exp(-x / 5.0) * torch.cos(x) - Psi / 5.0
 # The loss function
 def loss(x):
         x.requires_grad = True #enables autograd.
-        outputs = Psi_t(x)
-        Psi_t_x = torch.autograd.grad(outputs, x, grad_outputs=torch.ones_like(outputs),
-                  create_graph=True)[0]
+        outputs = Psi_t(x) # PyTorch builds a computational graph : x → N(x) → x * N(x) → Psi_t(x)
+        Psi_t_x = torch.autograd.grad(outputs, x, grad_outputs=torch.ones_like(outputs), create_graph=True)[0]
+                  # d/dx command  #fn is Psi_t #wrt x 
+                  # Autograd computes:
+                  # 𝑑/dx (∑_i y_i.v_i), where v = grad_outputs. So by setting v_i=1,
+                  # You get:  𝑑/dx (∑_i y_i), 👉 i.e., sum of gradients across batch
         return torch.mean((Psi_t_x - f(x, outputs)) ** 2)
 
 
