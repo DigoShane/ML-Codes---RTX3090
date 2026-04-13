@@ -39,7 +39,7 @@ def loss(x):
         x.requires_grad = True #enables autograd.
         outputs = Psi_t(x) # PyTorch builds a computational graph : x → N(x) → x * N(x) → Psi_t(x)
         Psi_t_x = torch.autograd.grad(outputs, x, grad_outputs=torch.ones_like(outputs), create_graph=True)[0]
-                  # d/dx command  #fn is Psi_t #wrt x 
+                  # d/dx command  #fn is Psi_t #wrt x  #AutoGrad computes ... (see below) #create_graph=True → needed for higher-order gradients (key in PINNs). Cause you need dL/d\theta?
                   # Autograd computes:
                   # 𝑑/dx (∑_i y_i.v_i), where v = grad_outputs. So by setting v_i=1,
                   # You get:  𝑑/dx (∑_i y_i), 👉 i.e., sum of gradients across batch
@@ -51,14 +51,16 @@ optimizer = torch.optim.LBFGS(N.parameters())
 
 # The collocation points used by Lagaris
 x = torch.Tensor(np.linspace(0, 2, 100)[:, None])
+# 100 points in domain [0,2]. These are collocation points
 
 # Run the optimizer
 def closure():
-    optimizer.zero_grad()
-    l = loss(x)
-    l.backward()
+    optimizer.zero_grad() #optimer was set in line 50 to LBFGS. PyTorch accumulates gradients by default. This sets all gradients to 0.
+    l = loss(x) # Forward pass through network
+    l.backward() # This computes: 𝑑𝐿/𝑑𝜃
     return l
-    
+
+# Takes 10 steps towards the minima. 
 for i in range(10):
     optimizer.step(closure)
 
@@ -66,7 +68,7 @@ for i in range(10):
 xx = np.linspace(0, 2, 100)[:, None]
 with torch.no_grad():
     yy = Psi_t(torch.Tensor(xx)).numpy()
-yt = np.exp(-xx / 5.0) * np.sin(xx)
+yt = np.exp(-xx / 5.0) * np.sin(xx) #Exact solution of ODE.
 
 fig, ax = plt.subplots(dpi=100)
 ax.plot(xx, yt, label='True')
@@ -74,12 +76,13 @@ ax.plot(xx, yy, '--', label='Neural network approximation')
 ax.set_xlabel('$x$')
 ax.set_ylabel('$\Psi(x)$')
 plt.legend(loc='best');
+plt.show()
 
-# We need to reinitialize the network
+# We need to reinitialize the network For a new experiment:
 N = nn.Sequential(nn.Linear(1, 50), nn.Sigmoid(), nn.Linear(50,1, bias=False))
 
 # Let's see now if a stochastic optimizer makes a difference
-adam = torch.optim.Adam(N.parameters(), lr=0.01)
+adam = torch.optim.Adam(N.parameters(), lr=0.01) # First-order stochastic optimizer
 
 # The batch size you want to use (how many points to use per iteration)
 n_batch = 5
@@ -114,3 +117,4 @@ ax.plot(xx, yy, '--', label='Neural network approximation')
 ax.set_xlabel('$x$')
 ax.set_ylabel('$\Psi(x)$')
 plt.legend(loc='best');
+plt.show()
