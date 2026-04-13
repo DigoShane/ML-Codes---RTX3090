@@ -1,0 +1,13 @@
+1. made a conda env:
+   conda create -n pinns python=3.10
+   conda activate pinns
+
+2. In this i installed tensor flow:
+   pip install tensorflow[and-cuda]
+
+3. installed supporting libraries:
+   pip install numpy scipy matplotlib jupyter
+   pip install sympy tqdm
+
+There are different folders.
+1. nanoHUB is a follow along with: https://www.youtube.com/watch?v=o9JaZGWekWQ&t=1471s
