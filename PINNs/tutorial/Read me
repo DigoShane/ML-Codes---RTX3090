@@ -1,0 +1,31 @@
+# =========================================================
+# PROJECT: Surrogate-Based Optimization for a PDE System
+# =========================================================
+#
+# PROBLEM DESCRIPTION:
+#
+# We consider the 1D steady-state diffusion equation:
+#
+#     -D * d^2u/dx^2 = π^2 sin(πx),   for x in (0,1)
+#
+# with boundary conditions:
+#
+#     u(0) = 0
+#     u(1) = 0
+#
+# Here:
+#     D = diffusion coefficient (scalar parameter)
+#
+# The analytical solution is:
+#
+#     u(x) = sin(πx) / D
+#
+#
+# OBJECTIVE:
+#
+# Learn a surrogate model using a neural network that approximates:
+#
+#     (D, x) → u(x)
+#
+# instead of solving the PDE directly.
+#
