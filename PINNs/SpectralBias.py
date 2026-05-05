@@ -1,149 +1,80 @@
-import torch
-import torch.nn as nn
+from fenics import *
 import numpy as np
+import os
 
-import matplotlib
-matplotlib.use("TkAgg")   # must come BEFORE pyplot import
+# ----------------------------
+# Output folder
+# ----------------------------
+os.makedirs("dataset", exist_ok=True)
 
-import matplotlib.pyplot as plt
+# ----------------------------
+# Mesh and space
+# ----------------------------
+mesh = UnitSquareMesh(64, 64)
+V = FunctionSpace(mesh, "CG", 1)
 
-# ------------------------
-# Device (GPU if available)
-# ------------------------
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print("Using device:", device)
+# ----------------------------
+# Boundary conditions
+# ----------------------------
+class Left(SubDomain):
+    def inside(self, x, on_boundary):
+        return on_boundary and near(x[0], 0)
 
-# ------------------------
-# Problem setup
-# ------------------------
-k = 7  # try k = 1 and k = 10
-N_f = 1000  # IMPORTANT: reduced from 100000 (too large for local GPU/CPU)
+class Right(SubDomain):
+    def inside(self, x, on_boundary):
+        return on_boundary and near(x[0], 1)
 
-def f(x):
-    return (k*np.pi)**2 * torch.sin(k*np.pi*x)
+bc_left = DirichletBC(V, Constant(0.0), Left())
+bc_right = DirichletBC(V, Constant(np.pi), Right())
+bcs = [bc_left, bc_right]
 
-def exact_solution(x):
-    return torch.sin(k*np.pi*x)
+# ----------------------------
+# Functions
+# ----------------------------
+theta = Function(V)
+v = TestFunction(V)
 
-# ------------------------
-# PINN Model
-# ------------------------
-class PINN(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(1, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh(),
-            nn.Linear(64, 1)
-        )
+A = Constant(1.0)
 
-    def forward(self, x):
-        return self.net(x)
+# ----------------------------
+# Sampling K
+# ----------------------------
+K_values = np.concatenate([
+    np.linspace(0.1, 1.0, 15),
+    np.linspace(1.0, 5.0, 25)
+])
 
-model = PINN().to(device)
+# ----------------------------
+# Coordinates (fixed mesh)
+# ----------------------------
+coords = mesh.coordinates()
 
-# ------------------------
-# Collocation + BC points (FIXED BUG HERE)
-# ------------------------
-x_f = torch.linspace(0, 1, N_f).view(-1,1).to(device)
+# ----------------------------
+# Loop over K
+# ----------------------------
+for i, K_val in enumerate(K_values):
+    print(f"Running K = {K_val:.3f}")
 
-x_b = torch.tensor([[0.0],[1.0]], device=device)
-u_b = torch.tensor([[0.0],[0.0]], device=device)
+    K = Constant(K_val)
 
-# ------------------------
-# PDE residual
-# ------------------------
-def pde_residual(x):
-    x.requires_grad_(True)
+    # Weak form
+    F = A*dot(grad(theta), grad(v))*dx + (K/2)*sin(2*theta)*v*dx
 
-    u = model(x)
+    solve(F == 0, theta, bcs)
 
-    u_x = torch.autograd.grad(
-        u, x,
-        grad_outputs=torch.ones_like(u),
-        create_graph=True
-    )[0]
+    # Extract values
+    theta_vals = theta.compute_vertex_values(mesh)
 
-    u_xx = torch.autograd.grad(
-        u_x, x,
-        grad_outputs=torch.ones_like(u_x),
-        create_graph=True
-    )[0]
+    # Compute m
+    m_x = np.cos(theta_vals)
+    m_y = np.sin(theta_vals)
+    m_vals = np.vstack([m_x, m_y]).T
 
-    return -u_xx - f(x)
-
-# ------------------------
-# Loss function
-# ------------------------
-def loss_fn():
-    res = pde_residual(x_f)
-    loss_pde = torch.mean(res**2)
-
-    u_pred = model(x_b)
-    loss_bc = torch.mean((u_pred - u_b)**2)
-
-    return loss_pde + loss_bc
-
-# ------------------------
-# Optimizer
-# ------------------------
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-# ------------------------
-# Training
-# ------------------------
-epochs = 5000
-loss_history = []
-
-for epoch in range(epochs):
-    optimizer.zero_grad()
-
-    loss = loss_fn()
-    loss.backward()
-    optimizer.step()
-
-    loss_history.append(loss.item())
-
-    if epoch % 500 == 0:
-        print(f"Epoch {epoch}, Loss: {loss.item():.4e}")
-
-# ------------------------
-# Evaluation
-# ------------------------
-x_test = torch.linspace(0,1,200).view(-1,1).to(device)
-
-with torch.no_grad():
-    u_pred = model(x_test).cpu().numpy()
-
-u_exact = exact_solution(x_test).cpu().numpy()
-
-# ------------------------
-# Plot solution
-# ------------------------
-plt.figure(figsize=(6,4))
-plt.plot(x_test.cpu(), u_exact, label="Exact")
-plt.plot(x_test.cpu(), u_pred, '--', label="PINN")
-plt.title(f"k = {k}")
-plt.legend()
-plt.grid()
-plt.show()
-
-# ------------------------
-# Error
-# ------------------------
-error = np.linalg.norm(u_exact - u_pred) / np.linalg.norm(u_exact)
-print(f"Relative L2 Error: {error:.2e}")
-
-# ------------------------
-# Plot loss
-# ------------------------
-plt.figure()
-plt.plot(loss_history)
-plt.yscale('log')
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.title("Training Loss")
-plt.grid()
-plt.show()
+    # Save
+    np.savez(
+        f"dataset/sample_{i:04d}.npz",
+        K=K_val,
+        coords=coords,
+        theta=theta_vals,
+        m=m_vals
+    )
