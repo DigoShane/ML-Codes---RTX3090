@@ -1,1 +1,153 @@
-This is about matching surroagate modeling for optimizaiton problems.
+Surrogate Modeling for Micromagnetics PDE
+=========================================
+
+Overview
+--------
+This project demonstrates how to build a neural network surrogate model for a nonlinear PDE arising in micromagnetics, and validate it against high-fidelity numerical solutions.
+
+The workflow consists of:
+
+1. Generating data using a finite element solver ( on ubuntu. I moved data set from ubuntu )
+2. Training a neural network to approximate the PDE solution
+3. Validating the surrogate by comparing it with FEM results
+
+
+Problem Description
+-------------------
+We consider the reduced micromagnetic energy:
+
+    E[θ] = ∫ ( A |∇θ|^2 + K sin^2(θ) ) dx
+
+where:
+- θ(x,y) is the magnetization angle
+- m = (cosθ, sinθ)
+- K is a material parameter
+
+The associated Euler–Lagrange equation is:
+
+    -A Δθ + (K/2) sin(2θ) = 0
+
+The goal is to learn the mapping:
+
+    (K, x, y) → m(x,y)
+
+
+Project Pipeline
+----------------
+
+1. Data Generation (FEM)
+
+Using FEniCS, we solve the PDE for multiple values of K.
+
+Each simulation produces:
+- Spatial coordinates (x,y)
+- Magnetization field m(x,y)
+
+Data is stored as:
+
+    dataset/sample_XXXX.npz
+
+Each file contains:
+- K: scalar parameter
+- coords: mesh coordinates (N,2)
+- m: magnetization (N,2)
+
+
+2. Surrogate Model (Neural Network)
+
+We train a neural network using PyTorch to approximate:
+
+    (K, x, y) → (m_x, m_y)
+
+Model Architecture:
+- Input: (K, x, y)
+- Hidden layers: 2 × 128 neurons with Tanh activation
+- Output: (m_x, m_y)
+
+A normalization layer enforces:
+
+    |m| ≈ 1
+
+
+3. Training
+
+The network is trained using mean squared error:
+
+    L = ||m_NN - m_FEM||^2
+
+Training setup:
+- Batch size: 4096
+- Epochs: 2000
+- Optimizer: Adam
+
+
+Validation
+----------
+
+After training, the surrogate is validated using two approaches.
+
+1. Error Field Visualization
+
+We compute:
+
+    e(x,y) = ||m_NN - m_FEM||
+
+and plot it over the domain.
+
+Expected behavior:
+- Low error across most of the domain
+- Higher error near domain walls (regions of high gradient)
+
+
+2. Line Cut Comparison
+
+We compare m_x along a horizontal slice:
+
+    y ≈ 0.5
+
+This shows:
+- Domain wall location
+- Transition sharpness
+
+Expected result:
+- NN closely matches FEM curve
+- Small deviations near steep gradients
+
+
+Key Results
+-----------
+- The neural network accurately reconstructs the magnetization field
+- Surrogate predictions match FEM solutions with low error
+- The model generalizes across different values of K
+
+
+Important Insights
+------------------
+
+What works well:
+- Field prediction m(x,y)
+- Interpolation across parameter K
+- Smooth spatial behavior
+
+Limitations:
+- Spatial derivatives from the NN are not reliable
+- Energy computations using NN gradients can be inaccurate
+- Physics is not explicitly enforced
+
+
+Code Structure
+--------------
+
+project/
+│
+├── dataset/
+│   ├── sample_0000.npz
+│   └── ...
+│
+├── surrogate2-Data.py
+└── ReadMe-surrogate2.txt
+
+The Plots are of :-
+1. K = 0.1
+2. K = 0.743
+3. K = 1.833
