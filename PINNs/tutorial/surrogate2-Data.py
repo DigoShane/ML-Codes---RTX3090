@@ -95,52 +95,81 @@ X_test = torch.cat([K_col, coords_t], dim=1)
 with torch.no_grad():
     m_pred = model(X_test).numpy()
 
-def compute_energy(model, K):
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
 
-    xy = torch.rand(5000,2)
+def compare_with_fem(model, file_path):
 
-    K_col = K.expand(xy.shape[0],1)
-    X = torch.cat([K_col, xy], dim=1)
+    data = np.load(file_path)
 
-    X.requires_grad_(True)
+    K = data["K"]
+    coords = data["coords"]      # (N,2)
+    m_true = data["m"]           # (N,2)
 
-    m = model(X)
+    device = next(model.parameters()).device
 
-    # compute gradients
-    grads = torch.autograd.grad(
-        m, X,
-        grad_outputs=torch.ones_like(m),
-        create_graph=True
-    )[0]
+    coords_t = torch.tensor(coords, dtype=torch.float32, device=device)
+    K_col = torch.full((coords.shape[0],1), float(K), device=device)
 
-    dm_dx = grads[:,1:3]
-
-    exchange = (dm_dx**2).sum(dim=1).mean()
-
-    anisotropy = (1 - m[:,0]**2).mean()
-
-    return exchange + K * anisotropy
-
-K_opt = torch.tensor([[1.0]], requires_grad=True)
-
-optimizer_K = optim.Adam([K_opt], lr=0.05)
-
-history = []
-
-for i in range(200):
-
-    optimizer_K.zero_grad()
-
-    J = compute_energy(model, K_opt)
-
-    J.backward()
-    optimizer_K.step()
+    X = torch.cat([K_col, coords_t], dim=1)
 
     with torch.no_grad():
-        K_opt.clamp_(0.1, 5)
+        m_pred = model(X).cpu().numpy()
 
-    history.append(K_opt.item())
+    error = np.linalg.norm(m_pred - m_true, axis=1)
 
-    if i % 20 == 0:
-        print(i, K_opt.item(), J.item())
+    # Plot error field
+    plt.figure(figsize=(6,5))
+    plt.scatter(coords[:,0], coords[:,1],
+                c=error, cmap="viridis", s=5)
 
+    plt.colorbar(label="|m_NN - m_FEM|")
+    plt.title(f"Error field for K = {K:.3f}")
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.tight_layout()
+    plt.show()
+
+    print("Mean error:", error.mean())
+    print("Max error:", error.max())
+
+def plot_line_cut(model, file_path):
+
+    data = np.load(file_path)
+
+    K = data["K"]
+    coords = data["coords"]
+    m_true = data["m"]
+
+    mask = np.abs(coords[:,1] - 0.5) < 0.01
+
+    coords_cut = coords[mask]
+    m_true_cut = m_true[mask]
+
+    coords_t = torch.tensor(coords_cut, dtype=torch.float32)
+    K_col = torch.full((coords_cut.shape[0],1), float(K))
+
+    X = torch.cat([K_col, coords_t], dim=1)
+
+    with torch.no_grad():
+        m_pred_cut = model(X).numpy()
+
+    idx = np.argsort(coords_cut[:,0])
+    x = coords_cut[idx,0]
+
+    plt.plot(x, m_true_cut[idx,0], label="FEM m_x")
+    plt.plot(x, m_pred_cut[idx,0], "--", label="NN m_x")
+
+    plt.legend()
+    plt.title(f"Line cut at y≈0.5, K={K:.2f}")
+    plt.xlabel("x")
+    plt.ylabel("m_x")
+    plt.show()
+
+
+compare_with_fem(model, "dataset/sample_0000.npz")
+compare_with_fem(model, "dataset/sample_0010.npz")
+compare_with_fem(model, "dataset/sample_0020.npz")
+
+plot_line_cut(model, "dataset/sample_0010.npz")
