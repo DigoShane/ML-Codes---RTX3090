@@ -4,7 +4,7 @@
 #Distribution looks reasonable
 #No absurd outliers (like 100 eV)
 
-from ase.io import read
+from ase.io import read # to read .xyz files
 import numpy as np
 import matplotlib.pyplot as plt
 
