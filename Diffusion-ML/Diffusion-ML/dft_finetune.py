@@ -8,7 +8,7 @@ import numpy as np
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load DFT dataset
-dataset = torch.load("data/processed/dft_centroids.pt")
+dataset = torch.load("data/processed/dft_centroids.pt", weights_only=False)
 loader = DataLoader(dataset, batch_size=8, shuffle=True)
 
 # Load pretrained model

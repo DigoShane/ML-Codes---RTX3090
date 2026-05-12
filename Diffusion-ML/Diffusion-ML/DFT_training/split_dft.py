@@ -6,7 +6,7 @@ import os
 
 os.makedirs("../data/processed", exist_ok=True)
 
-dataset = torch.load("../data/processed/dft_centroids.pt")
+dataset = torch.load("../data/processed/dft_centroids.pt", weights_only=False)
 
 np.random.seed(42)
 

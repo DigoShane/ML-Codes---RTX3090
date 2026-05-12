@@ -7,7 +7,7 @@ import numpy as np
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-dataset = load_dataset("data/raw/nebBVSE122k/nebBVSE122k_train.xyz")
+dataset = load_dataset("data/raw/nebBVSE122k/nebBVSE122k_train.xyz") #convert to grpah.
 loader = DataLoader(dataset, batch_size=16, shuffle=True)
 
 model = BarrierGNN().to(device)

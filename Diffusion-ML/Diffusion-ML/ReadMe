@@ -1,14 +1,181 @@
-Things to do:-
-1. Training takes 3 days. Need to optimize it.
-   Long time because it has to rebuild graphs.
+========================================
+ML + DFT PROJECT TRAINING INSTRUCTIONS
+========================================
 
-2. Try to improve model accuracy to overcome th underprediction at high barrier potential.
+----------------------------------------
+0. INITIAL SETUP CHECK
+----------------------------------------
 
-3. Do DFT fine tuning.
+Ensure the following folder structure exists:
 
-4. Do proper train/val/test benchmarking?
+project_root/
+│
+├── data/raw/nebBVSE122k/
+│ ├── nebBVSE122k_train.xyz
+│ ├── nebBVSE122k_test.xyz
+│
+├── data/raw/nebDFT2k/
+│ └── nebDFT2k_centroids.xyz
+│
+├── data/processed/
+├── models/
+├── results/
 
-5. Move the standard trainging, Finetuning into separate directories. Call the former BVSE_training.
+----------------------------------------
+1. SANITY CHECK DATA
+----------------------------------------
 
+Run:
 
+python inspect_data.py
 
+Expected:
+- No errors
+- Prints number of structures
+- Prints min, max, mean barrier
+- Shows histogram
+
+Check:
+- No NaNs
+- Barrier values reasonable (~0–3 eV)
+
+----------------------------------------
+2. PRECOMPUTE DFT GRAPHS
+----------------------------------------
+
+Run:
+
+python precompute_dft.py
+
+This:
+- Reads DFT xyz file
+- Converts structures → graph format
+- Saves processed dataset
+
+Output file created:
+
+data/processed/dft_centroids.pt
+
+----------------------------------------
+3. SPLIT DFT DATASET
+----------------------------------------
+
+Run:
+
+python DFT_Training/split_dft.py
+
+This:
+- Splits dataset into train/test
+
+Output files:
+
+data/processed/dft_train.pt
+data/processed/dft_test.pt
+
+----------------------------------------
+4. TRAIN BVSE MODEL (PRETRAINING)
+----------------------------------------
+
+Run:
+
+python train.py
+
+This:
+- Loads BVSE dataset
+- Converts to graphs
+- Trains GNN for 20 epochs
+
+Expected output:
+- Sample predictions (first epoch)
+- Loss decreasing over epochs
+
+Output file:
+
+models/bvse_pretrained.pt
+
+----------------------------------------
+5. FINE-TUNE ON DFT DATA
+----------------------------------------
+
+Run:
+
+python dft_finetune.py
+
+This:
+- Loads pretrained BVSE model
+- Trains further on DFT dataset
+
+Expected:
+- Loss decreases slowly
+
+Output file:
+
+models/dft_finetuned.pt
+
+----------------------------------------
+6. TRAIN DFT MODEL FROM SCRATCH (OPTIONAL)
+----------------------------------------
+
+Run:
+
+python DFT_Training/dft_scratch_train.py
+
+This:
+- Trains model only on DFT data
+
+Output file:
+
+models/dft_scratch.pt
+
+----------------------------------------
+7. EVALUATE AND COMPARE MODELS
+----------------------------------------
+
+Run:
+
+python DFT_Training/analysis_compare.py
+
+This:
+- Evaluates scratch vs fine-tuned models
+- Computes MAE and RMSE
+- Generates plots
+
+Output files:
+
+results/metrics_comparison.csv
+results/parity_comparison.png
+results/error_vs_barrier.png
+
+----------------------------------------
+8. FINAL MINIMAL PIPELINE
+----------------------------------------
+
+Run all steps in order:
+
+python inspect_data.py
+python precompute_dft.py
+python DFT_Training/split_dft.py
+python train.py
+python dft_finetune.py
+python DFT_Training/analysis_compare.py
+
+----------------------------------------
+9. COMMON ERRORS
+----------------------------------------
+
+File not found:
+- Check folder structure and file paths
+
+Missing "X" atom:
+- Dataset format incorrect
+
+CUDA errors:
+- Change device to CPU:
+device = torch.device("cpu")
+
+Loss not decreasing:
+- Possible dataset or graph construction issue
+
+----------------------------------------
+END OF INSTRUCTIONS
+----------------------------------------

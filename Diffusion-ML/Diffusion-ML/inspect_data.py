@@ -9,8 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Load BVSE training set
-atoms_list = read("data/raw/nebBVSE122k/nebBVSE122k_train.xyz", index=":")
-#atoms_list = read("data/raw/nebDFT2k/nebDFT2k_centroids.xyz", index=":")
+#atoms_list = read("data/raw/nebBVSE122k/nebBVSE122k_train.xyz", index=":")
+atoms_list = read("data/raw/nebDFT2k/nebDFT2k_centroids.xyz", index=":")
 
 print("Total structures:", len(atoms_list))
 
