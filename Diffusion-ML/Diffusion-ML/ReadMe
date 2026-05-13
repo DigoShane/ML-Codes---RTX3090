@@ -113,22 +113,7 @@ Output file:
 models/dft_finetuned.pt
 
 ----------------------------------------
-6. TRAIN DFT MODEL FROM SCRATCH (OPTIONAL)
-----------------------------------------
-
-Run:
-
-python DFT_Training/dft_scratch_train.py
-
-This:
-- Trains model only on DFT data
-
-Output file:
-
-models/dft_scratch.pt
-
-----------------------------------------
-7. EVALUATE AND COMPARE MODELS
+6. EVALUATE AND COMPARE MODELS
 ----------------------------------------
 
 Run:
@@ -146,36 +131,4 @@ results/metrics_comparison.csv
 results/parity_comparison.png
 results/error_vs_barrier.png
 
-----------------------------------------
-8. FINAL MINIMAL PIPELINE
-----------------------------------------
-
-Run all steps in order:
-
-python inspect_data.py
-python precompute_dft.py
-python DFT_Training/split_dft.py
-python train.py
-python dft_finetune.py
-python DFT_Training/analysis_compare.py
-
-----------------------------------------
-9. COMMON ERRORS
-----------------------------------------
-
-File not found:
-- Check folder structure and file paths
-
-Missing "X" atom:
-- Dataset format incorrect
-
-CUDA errors:
-- Change device to CPU:
-device = torch.device("cpu")
-
-Loss not decreasing:
-- Possible dataset or graph construction issue
-
-----------------------------------------
-END OF INSTRUCTIONS
 ----------------------------------------
