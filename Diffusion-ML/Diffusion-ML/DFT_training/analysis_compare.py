@@ -12,12 +12,12 @@ import pandas as pd
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load test set
-dataset = torch.load("../data/processed/dft_test.pt")
+dataset = torch.load("../data/processed/dft_test.pt", weights_only=False)
 loader = DataLoader(dataset, batch_size=8, shuffle=False)
 
 def evaluate_model(model_path):
     model = BarrierGNN().to(device)
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
 
     preds, true = [], []
@@ -38,14 +38,14 @@ def evaluate_model(model_path):
     return true, preds, mae, rmse
 
 
-true_s, pred_s, mae_s, rmse_s = evaluate_model("../models/dft_scratch.pt")
+true_bvse, pred_bvse, mae_bvse, rmse_bvse = evaluate_model("../models/bvse_pretrained.pt")
 true_f, pred_f, mae_f, rmse_f = evaluate_model("../models/dft_finetuned.pt")
 
 # Save metrics
 df = pd.DataFrame({
-    "Model": ["Scratch", "Fine-Tuned"],
-    "MAE": [mae_s, mae_f],
-    "RMSE": [rmse_s, rmse_f]
+    "Model": ["BVSE", "Fine-Tuned"],
+    "MAE": [mae_bvse, mae_f],
+    "RMSE": [rmse_bvse, rmse_f]
 })
 df.to_csv("results/metrics_comparison.csv", index=False)
 
@@ -53,10 +53,10 @@ df.to_csv("results/metrics_comparison.csv", index=False)
 plt.figure(figsize=(10,4))
 
 plt.subplot(1,2,1)
-plt.scatter(true_s, pred_s, alpha=0.6)
-plt.plot([true_s.min(), true_s.max()],
-         [true_s.min(), true_s.max()], color="red")
-plt.title("Scratch Model")
+plt.scatter(true_bvse, pred_bvse, alpha=0.6)
+plt.plot([true_bvse.min(), true_bvse.max()],
+         [true_bvse.min(), true_bvse.max()], color="red")
+plt.title("BVSE Model")
 plt.xlabel("True DFT Barrier (eV)")
 plt.ylabel("Predicted (eV)")
 
@@ -72,7 +72,7 @@ plt.savefig("results/parity_comparison.png")
 plt.show()
 
 # ---- Error vs Barrier Bin ----
-bins = np.linspace(true_s.min(), true_s.max(), 6)
+bins = np.linspace(true_bvse.min(), true_bvse.max(), 6)
 
 def bin_error(true, pred):
     errors = []
@@ -84,11 +84,11 @@ def bin_error(true, pred):
             centers.append((bins[i] + bins[i+1]) / 2)
     return centers, errors
 
-cent_s, err_s = bin_error(true_s, pred_s)
+cent_bvse, err_bvse = bin_error(true_bvse, pred_bvse)
 cent_f, err_f = bin_error(true_f, pred_f)
 
 plt.figure()
-plt.plot(cent_s, err_s, marker='o', label="Scratch")
+plt.plot(cent_bvse, err_bvse, marker='o', label="BVSE")
 plt.plot(cent_f, err_f, marker='o', label="Fine-Tuned")
 plt.xlabel("Barrier (eV)")
 plt.ylabel("MAE per Bin")
