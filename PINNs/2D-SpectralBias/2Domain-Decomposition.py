@@ -49,7 +49,7 @@ def sample_domain(N):
 # ============================================================
 # POISSON PROBLEM
 # ============================================================
-
+#determining f using manufactured solutions.
 def exact_u(x):
     return torch.sin(np.pi*x[:,0:1]) * torch.sin(np.pi*x[:,1:2])
 
@@ -129,7 +129,7 @@ x2 = points[mask2]
 def get_interface_points(points, cell_ids, target):
     interface_pts = []
     for i in range(len(points)):
-        neighbors = torch.norm(points - points[i], dim=1) < 0.05
+        neighbors = torch.norm(points - points[i], dim=1) < 1e-4
         if torch.any(cell_ids[neighbors] != cell_ids[i]):
             if cell_ids[i] == target or torch.any(cell_ids[neighbors] == target):
                 interface_pts.append(points[i])
