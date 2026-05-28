@@ -29,11 +29,13 @@ The primary benchmark problem is the Helmholtz equation due to its highly oscill
 # Development Roadmap
 
 ## Version 1
-Fixed manual domain decomposition. 
+Fixed manual domain decomposition. -> produces a visualization of training in Version1_eval folder.
+
+problems:
 ---> cant get the continutity condition at the interface to work.
 
 ## Version 2
-Adaptive splitting after optimization stagnation.
+Adaptive splitting after optimization stagnation. This is restricted to 2 domains.
 
 ## Version 3
 Candidate decomposition evaluation.

@@ -13,6 +13,7 @@
 #
 # One neural network per subdomain.
 # Continuity enforced weakly at interface.
+# The continuity at the interface seems to be hard to enforce, so we had to scale up the corresponding weights.
 # ============================================================
 
 import torch
@@ -101,6 +102,13 @@ model_right = PINN().to(device)
 # DERIVATIVES
 # ============================================================
 
+def first_derivative(model, x):
+    x.requires_grad_(True)
+    u = model(x)
+    u_x = torch.autograd.grad( u, x, grad_outputs=torch.ones_like(u), create_graph=True)[0]
+
+    return u_x
+
 def second_derivative(model, x):
     x.requires_grad_(True)
     u = model(x)
@@ -139,8 +147,12 @@ def loss_function():
     # u_left(a) = u_right(a)
     loss_interface = torch.mean((model_left(xa) - model_right(xa))**2)
 
+    # FLUX CONTINUITY
+    # u'_left(a) = u'_right(a)
+    loss_flux = torch.mean((first_derivative(model_left, xa) - first_derivative(model_right, xa))**2)
+
     # TOTAL LOSS
-    loss = (loss_pde + loss_bc + 100000*loss_interface)
+    loss = (loss_pde + loss_bc + 100*loss_interface + 10*loss_flux)
 
     return loss
 
