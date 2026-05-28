@@ -1,0 +1,285 @@
+# Adaptive PINNs for Mitigating Spectral Bias
+
+## Overview
+
+This project develops an adaptive neural domain decomposition framework for solving PDEs while mitigating the spectral bias of neural networks.
+
+The central hypothesis is:
+
+> Adaptive local neural approximation reduces effective local spectral complexity, thereby mitigating spectral bias in neural PDE solvers.
+
+The framework recursively decomposes the computational domain into localized subdomains and assigns independent neural networks to each region.
+
+---
+
+# Core Idea
+
+Instead of approximating the solution using a single global neural network, the computational domain is decomposed into multiple non-overlapping subdomains:
+
+\[
+\Omega = \bigcup_{i=1}^N \Omega_i.
+\]
+
+Each subdomain is assigned its own neural network approximation:
+
+\[
+u_i(x;\theta_i),
+\qquad
+x\in\Omega_i.
+\]
+
+Continuity between neighboring subdomains is enforced weakly through interface penalty terms.
+
+---
+
+# Motivation
+
+Neural networks are known to exhibit spectral bias, preferentially learning low-frequency components before high-frequency components. This makes standard PINNs difficult to train for:
+
+- oscillatory PDEs,
+- wave propagation,
+- multiscale problems,
+- localized sharp features,
+- high-frequency Helmholtz problems.
+
+The key observation motivating this work is:
+
+> A globally high-frequency function may become locally lower-frequency when restricted to sufficiently small spatial regions.
+
+---
+
+# Adaptive Refinement Philosophy
+
+The framework introduces spatial localization only when optimization stagnates.
+
+Training begins with a single neural network over the entire domain. When optimization ceases to significantly reduce the loss, the domain is decomposed into smaller subdomains, and local subnetworks are introduced.
+
+Refinement proceeds recursively, producing an adaptive hierarchy of localized neural approximations.
+
+---
+
+# Background Hypercube Structure
+
+The computational domain is represented using a fixed Cartesian hypercube decomposition with smallest admissible length scale:
+
+\[
+\ell.
+\]
+
+Examples:
+- 1D → intervals,
+- 2D → squares,
+- 3D → cubes.
+
+Subdomains are defined as unions of these hypercubes.
+
+---
+
+# Refinement Indicators
+
+Adaptive refinement is guided using:
+- optimization stagnation,
+- residual magnitude,
+- residual variation,
+- local high-frequency spectral content.
+
+The framework also evaluates candidate decompositions and selects the decomposition producing the largest projected reduction in the loss.
+
+---
+
+# Local Spectral Complexity
+
+Each subdomain is assigned a local spectral complexity indicator based on:
+- PDE residuals,
+- residual gradients,
+- Fourier analysis of local residual fields.
+
+This allows the framework to identify unresolved high-frequency structure.
+
+---
+
+# Local Coordinate Normalization
+
+Each subdomain employs normalized local coordinates to improve optimization conditioning and maintain comparable input scales across subnetworks.
+
+---
+
+# Model Problem
+
+The primary benchmark problem is the Helmholtz equation due to its highly oscillatory solutions and strong spectral bias characteristics.
+
+---
+
+# Development Roadmap
+
+## Version 1
+Fixed manual domain decomposition.
+
+## Version 2
+Adaptive splitting after optimization stagnation.
+
+## Version 3
+Candidate decomposition evaluation.
+
+## Version 4
+Recursive adaptive refinement.
+
+## Version 5
+Hypercube-based decomposition.
+
+## Version 6
+Spectral-aware adaptive refinement.
+
+## Version 7
+2D/3D quadtree-octree adaptive PINNs.
+
+## Version 8
+Full optimization-driven adaptive neural PDE solver.
+
+---
+
+# Long-Term Goal
+
+The long-term objective is to develop a scalable adaptive neural multiresolution PDE solver capable of overcoming spectral bias through recursive localized approximation.# Adaptive PINNs for Mitigating Spectral Bias
+
+## Overview
+
+This project develops an adaptive neural domain decomposition framework for solving PDEs while mitigating the spectral bias of neural networks.
+
+The central hypothesis is:
+
+> Adaptive local neural approximation reduces effective local spectral complexity, thereby mitigating spectral bias in neural PDE solvers.
+
+The framework recursively decomposes the computational domain into localized subdomains and assigns independent neural networks to each region.
+
+---
+
+# Core Idea
+
+Instead of approximating the solution using a single global neural network, the computational domain is decomposed into multiple non-overlapping subdomains:
+
+\[
+\Omega = \bigcup_{i=1}^N \Omega_i.
+\]
+
+Each subdomain is assigned its own neural network approximation:
+
+\[
+u_i(x;\theta_i),
+\qquad
+x\in\Omega_i.
+\]
+
+Continuity between neighboring subdomains is enforced weakly through interface penalty terms.
+
+---
+
+# Motivation
+
+Neural networks are known to exhibit spectral bias, preferentially learning low-frequency components before high-frequency components. This makes standard PINNs difficult to train for:
+
+- oscillatory PDEs,
+- wave propagation,
+- multiscale problems,
+- localized sharp features,
+- high-frequency Helmholtz problems.
+
+The key observation motivating this work is:
+
+> A globally high-frequency function may become locally lower-frequency when restricted to sufficiently small spatial regions.
+
+---
+
+# Adaptive Refinement Philosophy
+
+The framework introduces spatial localization only when optimization stagnates.
+
+Training begins with a single neural network over the entire domain. When optimization ceases to significantly reduce the loss, the domain is decomposed into smaller subdomains, and local subnetworks are introduced.
+
+Refinement proceeds recursively, producing an adaptive hierarchy of localized neural approximations.
+
+---
+
+# Background Hypercube Structure
+
+The computational domain is represented using a fixed Cartesian hypercube decomposition with smallest admissible length scale:
+
+\[
+\ell.
+\]
+
+Examples:
+- 1D → intervals,
+- 2D → squares,
+- 3D → cubes.
+
+Subdomains are defined as unions of these hypercubes.
+
+---
+
+# Refinement Indicators
+
+Adaptive refinement is guided using:
+- optimization stagnation,
+- residual magnitude,
+- residual variation,
+- local high-frequency spectral content.
+
+The framework also evaluates candidate decompositions and selects the decomposition producing the largest projected reduction in the loss.
+
+---
+
+# Local Spectral Complexity
+
+Each subdomain is assigned a local spectral complexity indicator based on:
+- PDE residuals,
+- residual gradients,
+- Fourier analysis of local residual fields.
+
+This allows the framework to identify unresolved high-frequency structure.
+
+---
+
+# Local Coordinate Normalization
+
+Each subdomain employs normalized local coordinates to improve optimization conditioning and maintain comparable input scales across subnetworks.
+
+---
+
+# Model Problem
+
+The primary benchmark problem is the Helmholtz equation due to its highly oscillatory solutions and strong spectral bias characteristics.
+
+---
+
+# Development Roadmap
+
+## Version 1
+Fixed manual domain decomposition.
+
+## Version 2
+Adaptive splitting after optimization stagnation.
+
+## Version 3
+Candidate decomposition evaluation.
+
+## Version 4
+Recursive adaptive refinement.
+
+## Version 5
+Hypercube-based decomposition.
+
+## Version 6
+Spectral-aware adaptive refinement.
+
+## Version 7
+2D/3D quadtree-octree adaptive PINNs.
+
+## Version 8
+Full optimization-driven adaptive neural PDE solver.
+
+---
+
+# Long-Term Goal
+
+The long-term objective is to develop a scalable adaptive neural multiresolution PDE solver capable of overcoming spectral bias through recursive localized approximation.
