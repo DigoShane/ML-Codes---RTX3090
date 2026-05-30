@@ -60,12 +60,7 @@ else:
 # ============================================================
 
 output_root = "Version1_eval"
-
-if os.path.exists(output_root):
-    shutil.rmtree(output_root)
-
-os.makedirs(output_root)
-
+os.makedirs(output_root, exist_ok=True)
 
 # ============================================================
 # PROBLEM SETUP
@@ -203,7 +198,7 @@ def build_subdomains(num_subdomains, N_f):
     interface_points = []
 
     for i in range(1, num_subdomains):
-        xi = torch.tensor([[endpoints[i]]], device=device)
+        xi = torch.tensor([[endpoints[i]]], device=device, dtype=torch.float32)
         interface_points.append(xi)
 
     return subdomain_intervals, collocation_points, interface_points
@@ -491,12 +486,12 @@ def train_case(case_number, num_subdomains):
     print("="*60)
 
     case_folder = f"{output_root}/Case_{case_number}"
-    os.makedirs(case_folder, exist_ok=True)
+    if os.path.exists(case_folder):
+        shutil.rmtree(case_folder)
+    
+    os.makedirs(case_folder)
 
-    subdomain_intervals, collocation_points, interface_points = build_subdomains(
-        num_subdomains,
-        N_f
-    )
+    subdomain_intervals, collocation_points, interface_points = build_subdomains( num_subdomains, N_f)
 
     models = []
 
