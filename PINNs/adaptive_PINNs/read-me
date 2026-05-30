@@ -36,6 +36,10 @@ problems:
 
 ## Version 2
 Adaptive splitting after optimization stagnation. This is restricted to 2 domains.
+We detect when to split 1 domain into 2. The split is [0,0.5]U[0.5,1]
+Convergence very bad. Loss spikes after domain decomposition. 
+lr before decomposition is 1e-3. lr after decompositions is 1e-4.
+**This is imcomplete as of now. I dont think the weights are changing.**
 
 ## Version 3
 Candidate decomposition evaluation.
