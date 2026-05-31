@@ -99,10 +99,12 @@ def second_derivative(model,x):
 # ============================================================
 
 def global_residual(model,x):
-    u = model(x)
-    uxx = second_derivative(model,x)
+    x_req = x.clone().detach().requires_grad_(True)
+    u = model(x_req)
+    ux = torch.autograd.grad( u, x_req, grad_outputs=torch.ones_like(u), create_graph=True)[0]
+    uxx = torch.autograd.grad( ux, x_req, grad_outputs=torch.ones_like(ux), create_graph=True)[0]
 
-    return ( -uxx - helmholtz_k**2*u - forcing(x) )
+    return ( -uxx - helmholtz_k**2*u - forcing(x_req) )
 
 # ============================================================
 # WINDOW FUNCTION
@@ -204,8 +206,7 @@ for epoch in range(epochs_stage1):
 
 x_residual = ( torch.linspace(0,1,4000).view(-1,1).to(device))
 
-with torch.no_grad():
-    eta = (global_residual( global_model, x_residual).detach().cpu().numpy().flatten())**2
+eta = (global_residual( global_model, x_residual).detach().cpu().numpy().flatten())**2
 
 tau = 0.5
 mask = ( eta > tau*np.max(eta))
