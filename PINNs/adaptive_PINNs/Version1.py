@@ -54,6 +54,24 @@ if case_choice.lower() == "all":
 else:
     cases_to_run = [int(case_choice)]
 
+# ============================================================
+# TRAINING CONTROL
+# ============================================================
+
+training_mode = input( "Training mode? Enter 'fixed' for fixed epochs or 'tol' to train until loss tolerance: ").lower()
+
+if training_mode == "fixed":
+    fixed_epochs = int(input("Enter number of epochs: "))
+    loss_tolerance = None
+    max_epochs = fixed_epochs
+
+elif training_mode == "tol":
+    loss_tolerance = float(input("Enter loss tolerance, e.g. 1e-4: "))
+    max_epochs = int(input("Enter maximum allowed epochs, e.g. 50000: "))
+    fixed_epochs = None
+
+else:
+    raise ValueError("training_mode must be either 'fixed' or 'tol'.")
 
 # ============================================================
 # OUTPUT FOLDER
@@ -513,7 +531,6 @@ def train_case(case_number, num_subdomains):
     # Training parameters
     # --------------------------------------------------------
 
-    epochs = 5000
     save_every = 100
 
     loss_history = []
@@ -526,20 +543,18 @@ def train_case(case_number, num_subdomains):
     # Training loop
     # --------------------------------------------------------
 
-    for epoch in range(epochs + 1):
+    epoch = 0
+
+    while True:
 
         optimizer.zero_grad()
 
-        loss, loss_pde, loss_bc, loss_interface_u, loss_interface_flux = loss_function(
-            models,
-            collocation_points,
-            interface_points
-        )
+        loss, loss_pde, loss_bc, loss_interface_u, loss_interface_flux = loss_function( models, collocation_points, interface_points)
 
         loss.backward()
         optimizer.step()
-
-        loss_history.append(loss.item())
+        current_loss = loss.item()
+        loss_history.append(current_loss)
         pde_loss_history.append(loss_pde.item())
         bc_loss_history.append(loss_bc.item())
 
@@ -557,33 +572,44 @@ def train_case(case_number, num_subdomains):
             print(
                 f"Case {case_number} | "
                 f"Epoch {epoch:5d} | "
-                f"Total = {loss.item():.4e} | "
+                f"Total = {current_loss:.4e} | "
                 f"PDE = {loss_pde.item():.4e} | "
                 f"BC = {loss_bc.item():.4e} | "
                 f"Interface = {interface_loss_history[-1]:.4e} | "
                 f"Flux = {flux_loss_history[-1]:.4e}"
             )
 
-            save_current_solution(
-                models,
-                subdomain_intervals,
-                epoch,
-                case_folder
-            )
+            save_current_solution( models, subdomain_intervals, epoch, case_folder)
 
-            save_residual_plot(
-                models,
-                subdomain_intervals,
-                epoch,
-                case_folder
-            )
+            save_residual_plot( models, subdomain_intervals, epoch, case_folder)
 
-            save_log_residual_plot(
-                models,
-                subdomain_intervals,
-                epoch,
-                case_folder
-            )
+            save_log_residual_plot( models, subdomain_intervals, epoch, case_folder)
+
+        # --------------------------------------------------------
+        # Stopping criterion
+        # --------------------------------------------------------
+
+        if training_mode == "fixed":
+            if epoch >= fixed_epochs:
+                print(f"Stopping Case {case_number}: reached fixed epoch count.")
+                break
+
+        elif training_mode == "tol":
+            if current_loss <= loss_tolerance:
+                print(
+                    f"Stopping Case {case_number}: "
+                    f"loss {current_loss:.4e} reached tolerance {loss_tolerance:.4e}."
+                )
+                break
+
+            if epoch >= max_epochs:
+                print(
+                    f"Stopping Case {case_number}: "
+                    f"reached max_epochs = {max_epochs} before tolerance."
+                )
+                break
+
+        epoch += 1
 
     # --------------------------------------------------------
     # Save loss histories
@@ -619,26 +645,11 @@ def train_case(case_number, num_subdomains):
     with open(f"{case_folder}/relative_L2_error.txt", "w") as f:
         f.write(f"Relative L2 Error = {error.item():.12e}\n")
 
-    save_current_solution(
-        models,
-        subdomain_intervals,
-        epochs,
-        case_folder
-    )
+    save_current_solution( models, subdomain_intervals, epoch, case_folder)
 
-    save_residual_plot(
-        models,
-        subdomain_intervals,
-        epochs,
-        case_folder
-    )
+    save_residual_plot( models, subdomain_intervals, epoch, case_folder)
 
-    save_log_residual_plot(
-        models,
-        subdomain_intervals,
-        epochs,
-        case_folder
-    )
+    save_log_residual_plot( models, subdomain_intervals, epoch, case_folder)
 
     return error.item()
 
