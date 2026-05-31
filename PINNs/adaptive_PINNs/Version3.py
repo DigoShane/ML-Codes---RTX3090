@@ -163,6 +163,41 @@ def save_solution( epoch, global_model, local_model=None, xL=None, xR=None):
     plt.close()
 
 # ============================================================
+# SAVE ETA PLOT
+# ============================================================
+
+def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None):
+    """
+    Plots eta(x) = r(x)^2 across [0,1].
+    Stage 1: uses global_residual on global_model.
+    Stage 2: uses enriched_residual on global+local model.
+    """
+    x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
+
+    if local_model is None:
+        r = global_residual(global_model, x_test)
+    else:
+        r = enriched_residual(x_test, global_model, local_model, xL, xR)
+
+    eta = (r.detach().cpu().numpy().flatten())**2
+    x_np = x_test.detach().cpu().numpy().flatten()
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(x_np, eta, color='darkorange', linewidth=0.8, label=r'$\eta = r^2$')
+    plt.axhline(0, color='black', linewidth=0.5, linestyle='--')
+    if xL is not None:
+        plt.axvline(xL, color='k', linestyle=':', linewidth=0.8)
+        plt.axvline(xR, color='k', linestyle=':', linewidth=0.8)
+    plt.xlabel("x")
+    plt.ylabel(r"$\eta(x)$")
+    plt.title(f"$\\eta$ — Epoch {epoch}")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f"{output_folder}/eta_{epoch:05d}.png", dpi=150, bbox_inches='tight')
+    plt.close()
+
+# ============================================================
 # STAGE 1
 # GLOBAL TRAINING
 # ============================================================
@@ -191,6 +226,7 @@ for epoch in range(epochs_stage1):
             f"{loss.item():.4e}"
         )
         save_solution( epoch, global_model)
+        save_eta_plot( epoch, global_model)
 
     if epoch > 2*window:
         old_loss = np.mean( loss_history[-2*window:-window])
@@ -206,7 +242,11 @@ for epoch in range(epochs_stage1):
 
 x_residual = ( torch.linspace(0,1,4000).view(-1,1).to(device))
 
-eta = (global_residual( global_model, x_residual).detach().cpu().numpy().flatten())**2
+eta = (global_residual(global_model, x_residual).detach().cpu().numpy().flatten())**2
+
+# ============================================================
+# HOTSPOT DETECTION
+# ============================================================
 
 tau = 0.5
 mask = ( eta > tau*np.max(eta))
@@ -270,6 +310,7 @@ for epoch in range(epochs_stage2):
             f"{loss.item():.4e}"
         )
         save_solution( epoch+epochs_stage1, global_model, local_model, xL, xR)
+        save_eta_plot( epoch+epochs_stage1, global_model, local_model, xL, xR)
 
 # ============================================================
 # FINAL ERROR
