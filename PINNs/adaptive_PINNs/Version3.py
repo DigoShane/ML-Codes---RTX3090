@@ -111,8 +111,15 @@ def global_residual(model,x):
 # ============================================================
 
 def window_function(x,xL,xR,delta=0.02):
+    c = 0.5*(xL + xR)
+    half_width = 0.5*(xR - xL)
+    xi = (x - c)/half_width
+    w = torch.zeros_like(x)
+    mask = torch.abs(xi) < 1.0
+    w[mask] = torch.exp(-1.0/(1.0 - xi[mask]**2))
+    w /= torch.max(w)
 
-    return 0.5*( torch.tanh((x-xL)/delta) - torch.tanh((x-xR)/delta) )
+    return w
 
 # ============================================================
 # ENRICHED SOLUTION
@@ -184,11 +191,11 @@ def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None):
 
     plt.figure(figsize=(8, 4))
     plt.plot(x_np, eta, color='darkorange', linewidth=0.8, label=r'$\eta = r^2$')
-    #Displaying collocation points -START !! Comment out if you dont want to plot.
-    collocation_np = ( x_global.detach().cpu().numpy().flatten())
-    for xc in collocation_np:
-        plt.axvline( xc, color='red', linewidth=0.2, alpha=0.4)
-    #Displaying collocation points -END
+    ##Displaying collocation points -START !! Comment out if you dont want to plot.
+    #collocation_np = ( x_global.detach().cpu().numpy().flatten())
+    #for xc in collocation_np:
+    #    plt.axvline( xc, color='red', linewidth=0.2, alpha=0.4)
+    ##Displaying collocation points -END
     plt.axhline(0, color='black', linewidth=0.5, linestyle='--')
     if xL is not None:
         plt.axvline(xL, color='k', linestyle=':', linewidth=0.8)
