@@ -110,16 +110,8 @@ def global_residual(model,x):
 # WINDOW FUNCTION
 # ============================================================
 
-def window_function(x,xL,xR,delta=0.02):
-    c = 0.5*(xL + xR)
-    half_width = 0.5*(xR - xL)
-    xi = (x - c)/half_width
-    w = torch.zeros_like(x)
-    mask = torch.abs(xi) < 1.0
-    w[mask] = torch.exp(-1.0/(1.0 - xi[mask]**2))
-    w /= torch.max(w)
-
-    return w
+def window_function(x, xL, xR):
+    return 0.5*( torch.tanh((x-xL)/delta) - torch.tanh((x-xR)/delta) )
 
 # ============================================================
 # ENRICHED SOLUTION
