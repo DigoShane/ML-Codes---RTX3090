@@ -417,60 +417,6 @@ def save_residual_plot(
 
 
 # ============================================================
-# SAVE ABSOLUTE LOG RESIDUAL PLOT
-# ============================================================
-
-def save_log_residual_plot(
-    models,
-    subdomain_intervals,
-    epoch,
-    case_folder
-):
-    x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
-
-    x_all = []
-    residual_all = []
-
-    for i, (xL, xR) in enumerate(subdomain_intervals):
-
-        if i == len(subdomain_intervals) - 1:
-            mask = (x_test >= xL) & (x_test <= xR)
-        else:
-            mask = (x_test >= xL) & (x_test < xR)
-
-        x_local = x_test[mask.squeeze()]
-
-        if len(x_local) > 0:
-            res_local = pde_residual(models[i], x_local)
-
-            x_all.append(x_local.detach().cpu().numpy().flatten())
-            residual_all.append(res_local.detach().cpu().numpy().flatten())
-
-    x_np = np.concatenate(x_all)
-    res_np = np.concatenate(residual_all)
-
-    plt.figure(figsize=(8, 4))
-    plt.semilogy(x_np, np.abs(res_np) + 1e-12, linewidth=0.8)
-
-    for xL, xR in subdomain_intervals[1:]:
-        plt.axvline(xL, color="black", linestyle=":", linewidth=0.8)
-
-    plt.xlabel("x")
-    plt.ylabel("|PDE Residual|")
-    plt.title(f"Absolute PDE Residual — Epoch {epoch}")
-    plt.grid(True)
-    plt.tight_layout()
-
-    plt.savefig(
-        f"{case_folder}/log_residual_epoch_{epoch:05d}.png",
-        dpi=150,
-        bbox_inches="tight"
-    )
-
-    plt.close()
-
-
-# ============================================================
 # SAVE LOSS PLOT
 # ============================================================
 
@@ -583,8 +529,6 @@ def train_case(case_number, num_subdomains):
 
             save_residual_plot( models, subdomain_intervals, epoch, case_folder)
 
-            save_log_residual_plot( models, subdomain_intervals, epoch, case_folder)
-
         # --------------------------------------------------------
         # Stopping criterion
         # --------------------------------------------------------
@@ -648,8 +592,6 @@ def train_case(case_number, num_subdomains):
     save_current_solution( models, subdomain_intervals, epoch, case_folder)
 
     save_residual_plot( models, subdomain_intervals, epoch, case_folder)
-
-    save_log_residual_plot( models, subdomain_intervals, epoch, case_folder)
 
     return error.item()
 

@@ -1,1 +1,1 @@
-Case 1: Relative L2 Error = 5.549590110779e+00
+Case 1: Relative L2 Error = 5.511926174164e+00
