@@ -184,6 +184,11 @@ def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None):
 
     plt.figure(figsize=(8, 4))
     plt.plot(x_np, eta, color='darkorange', linewidth=0.8, label=r'$\eta = r^2$')
+    #Displaying collocation points -START !! Comment out if you dont want to plot.
+    collocation_np = ( x_global.detach().cpu().numpy().flatten())
+    for xc in collocation_np:
+        plt.axvline( xc, color='red', linewidth=0.2, alpha=0.4)
+    #Displaying collocation points -END
     plt.axhline(0, color='black', linewidth=0.5, linestyle='--')
     if xL is not None:
         plt.axvline(xL, color='k', linestyle=':', linewidth=0.8)
