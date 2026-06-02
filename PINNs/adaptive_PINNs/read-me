@@ -46,15 +46,3 @@ Candidate decomposition evaluation.
 
 ## Version 4
 Recursive adaptive refinement.
-
-## Version 5
-Hypercube-based decomposition.
-
-## Version 6
-Spectral-aware adaptive refinement.
-
-## Version 7
-2D/3D quadtree-octree adaptive PINNs.
-
-## Version 8
-Full optimization-driven adaptive neural PDE solver.

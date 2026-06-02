@@ -166,11 +166,12 @@ def save_solution( epoch, global_model, local_model=None, xL=None, xR=None):
 # SAVE ETA PLOT
 # ============================================================
 
-def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None):
+def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None, eta_snapshot=None, x_snapshot=None):
     """
-    Plots eta(x) = r(x)^2 across [0,1].
+    Plots eta(x) = log(r^2) across [0,1].
     Stage 1: uses global_residual on global_model.
     Stage 2: uses enriched_residual on global+local model.
+    If eta_snapshot is provided, overlays it as a thin reference curve.
     """
     x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
 
@@ -194,6 +195,9 @@ def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None):
     if xL is not None:
         plt.axvline(xL, color='k', linestyle=':', linewidth=0.8)
         plt.axvline(xR, color='k', linestyle=':', linewidth=0.8)
+    if eta_snapshot is not None:
+        plt.plot(x_snapshot, eta_snapshot, color='steelblue', linewidth=0.5,
+                 linestyle='--', alpha=0.6, label=r'$\eta$ at enrichment start')
     plt.xlabel("x")
     plt.ylabel(r"$\eta(x) = \log(r^2)$")
     plt.title(f"$\\eta$ — Epoch {epoch}")
@@ -249,6 +253,10 @@ for epoch in range(epochs_stage1):
 x_residual = ( torch.linspace(0,1,4000).view(-1,1).to(device))
 
 eta = np.log((global_residual(global_model, x_residual).detach().cpu().numpy().flatten())**2 + 1e-12)
+
+# Store snapshot of eta used for hotspot detection — overlaid on Stage 2 plots
+eta_snapshot    = eta.copy()
+x_snapshot      = x_residual.detach().cpu().numpy().flatten()
 
 # ============================================================
 # HOTSPOT DETECTION
@@ -316,6 +324,7 @@ optimizer = torch.optim.Adam( list(global_model.parameters()) + list(local_model
 # ============================================================
 
 epochs_stage2 = 10000
+loss_history_stage2 = []
 
 for epoch in range(epochs_stage2):
 
@@ -331,6 +340,7 @@ for epoch in range(epochs_stage2):
         break
     loss.backward()
     optimizer.step()
+    loss_history_stage2.append(loss.item())
 
     if epoch % 100 == 0:
         print(
@@ -339,7 +349,8 @@ for epoch in range(epochs_stage2):
             f"{loss.item():.4e}"
         )
         save_solution( epoch+epochs_stage1, global_model, local_model, xL, xR)
-        save_eta_plot( epoch+epochs_stage1, global_model, local_model, xL, xR)
+        save_eta_plot( epoch+epochs_stage1, global_model, local_model, xL, xR,
+                       eta_snapshot=eta_snapshot, x_snapshot=x_snapshot)
 
 # ============================================================
 # FINAL ERROR
@@ -357,3 +368,24 @@ error = ( torch.norm(u_exact-u_pred)/torch.norm(u_exact))
 print()
 print("FINAL RELATIVE L2 ERROR")
 print(error.item())
+
+# ============================================================
+# LOSS HISTORY PLOT
+# ============================================================
+
+n1 = len(loss_history)
+n2 = len(loss_history_stage2)
+
+plt.figure(figsize=(10, 4))
+plt.plot(np.arange(n1), loss_history, label="Stage 1 (Global)")
+plt.plot(np.arange(n1, n1 + n2), loss_history_stage2, label="Stage 2 (Enriched)")
+plt.axvline(n1, color='black', linestyle=':', label='Enrichment Start')
+plt.yscale('log')
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Loss vs Epoch")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(f"{output_folder}/loss_history.png", dpi=150, bbox_inches='tight')
+plt.show()
