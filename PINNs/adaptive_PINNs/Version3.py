@@ -43,6 +43,34 @@ def forcing(x):
     return ( (omega*np.pi)**2 - helmholtz_k**2)*torch.sin(omega*np.pi*x)
 
 # ============================================================
+# OPTIMIZER SETTINGS
+# ============================================================
+
+optimizer_type = "adam" 
+#optimizer_type = "sgd" 
+#optimizer_type = "gd"
+learning_rate = 1e-4
+
+# ============================================================
+# OPTIMIZER FACTORY
+# ============================================================
+
+def create_optimizer(parameters):
+    if optimizer_type.lower() == "adam":
+        return torch.optim.Adam( parameters, lr=learning_rate)
+    elif optimizer_type.lower() == "sgd":
+        return torch.optim.SGD(  parameters, lr=learning_rate, momentum=0.9)
+    elif optimizer_type.lower() == "gd":
+        return torch.optim.SGD( parameters, lr=learning_rate, momentum=0.0)
+    else:
+        raise ValueError( f"Unknown optimizer: {optimizer_type}")
+      
+print()
+print("Optimizer:", optimizer_type)
+print("Learning rate:", learning_rate)
+print()
+
+# ============================================================
 # COLLOCATION POINTS
 # ============================================================
 
@@ -222,7 +250,7 @@ def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None, eta_s
 # ============================================================
 
 global_model = PINN().to(device)
-optimizer = torch.optim.Adam( global_model.parameters(), lr=1e-3)
+optimizer = create_optimizer( global_model.parameters())
 loss_history = []
 epochs_stage1 = 5000
 window = 500
@@ -330,8 +358,7 @@ plt.show()
 # ============================================================
 
 local_model = PINN().to(device)
-
-optimizer = torch.optim.Adam( list(global_model.parameters()) + list(local_model.parameters()), lr=1e-4)
+optimizer = create_optimizer( list(global_model.parameters()) + list(local_model.parameters()))
 
 # ============================================================
 # STAGE 2
