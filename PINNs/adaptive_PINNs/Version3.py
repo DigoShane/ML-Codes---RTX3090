@@ -110,8 +110,9 @@ def global_residual(model,x):
 # WINDOW FUNCTION
 # ============================================================
 
-def window_function(x, xL, xR):
-    return 0.5*( torch.tanh((x-xL)/delta) - torch.tanh((x-xR)/delta) )
+def window_function(x, xL, xR, delta=0.02):
+    #return 0.5*( torch.tanh((x-xL)/delta) - torch.tanh((x-xR)/delta) )
+    return ((x >= xL) & (x <= xR)).float() #characteristic function window.
 
 # ============================================================
 # ENRICHED SOLUTION
@@ -179,10 +180,11 @@ def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None):
         r = enriched_residual(x_test, global_model, local_model, xL, xR)
 
     eta = (r.detach().cpu().numpy().flatten())**2
+    eta = np.log(eta + 1e-12)  # log(r^2), small epsilon avoids log(0)
     x_np = x_test.detach().cpu().numpy().flatten()
 
     plt.figure(figsize=(8, 4))
-    plt.plot(x_np, eta, color='darkorange', linewidth=0.8, label=r'$\eta = r^2$')
+    plt.plot(x_np, eta, color='darkorange', linewidth=0.8, label=r'$\eta = \log(r^2)$')
     ##Displaying collocation points -START !! Comment out if you dont want to plot.
     #collocation_np = ( x_global.detach().cpu().numpy().flatten())
     #for xc in collocation_np:
@@ -193,7 +195,7 @@ def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None):
         plt.axvline(xL, color='k', linestyle=':', linewidth=0.8)
         plt.axvline(xR, color='k', linestyle=':', linewidth=0.8)
     plt.xlabel("x")
-    plt.ylabel(r"$\eta(x)$")
+    plt.ylabel(r"$\eta(x) = \log(r^2)$")
     plt.title(f"$\\eta$ — Epoch {epoch}")
     plt.legend()
     plt.grid(True)
@@ -246,7 +248,7 @@ for epoch in range(epochs_stage1):
 
 x_residual = ( torch.linspace(0,1,4000).view(-1,1).to(device))
 
-eta = (global_residual(global_model, x_residual).detach().cpu().numpy().flatten())**2
+eta = np.log((global_residual(global_model, x_residual).detach().cpu().numpy().flatten())**2 + 1e-12)
 
 # ============================================================
 # HOTSPOT DETECTION
@@ -276,9 +278,25 @@ for i,val in enumerate(mask):
 xL = x_residual[best_start].item()
 xR = x_residual[best_end].item()
 
+#enforcing minwidth 2% of domain length
+min_width = 0.10
+if (xR - xL) < min_width:
+    center = 0.5*(xL + xR)
+    xL = max( 0.0, center - min_width/2)
+    xR = min(1.0, center + min_width/2)
+
 print("ENRICHMENT REGION:")
 print("xL =",xL)
 print("xR =",xR)
+print("WIDTH =",xR-xL)
+
+x_plot = torch.linspace( 0, 1, 2000).view(-1,1).to(device)
+w_plot = ( window_function( x_plot, xL, xR).cpu().numpy())
+plt.figure(figsize=(8,4))
+plt.plot( x_plot.cpu().numpy(), w_plot)
+plt.grid()
+plt.title("Characteristic Window")
+plt.show()
 
 # ============================================================
 # LOCAL CORRECTION NETWORK
@@ -304,6 +322,9 @@ for epoch in range(epochs_stage2):
     u1 = enriched_solution( x1, global_model, local_model, xL, xR)
     loss_bc = ( torch.mean(u0**2) + torch.mean(u1**2))
     loss = loss_pde + loss_bc
+    if torch.isnan(loss):
+        print("NaN DETECTED")
+        break
     loss.backward()
     optimizer.step()
 
