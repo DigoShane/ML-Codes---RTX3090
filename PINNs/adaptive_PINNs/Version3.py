@@ -114,13 +114,19 @@ def window_function(x, xL, xR, delta=0.02):
     #return 0.5*( torch.tanh((x-xL)/delta) - torch.tanh((x-xR)/delta) )
     return ((x >= xL) & (x <= xR)).float() #characteristic function window.
 
+def local_coordinate(x, xL, xR):
+    center = 0.5*(xL+xR)
+    half_width = 0.5*(xR-xL)
+    return (x-center)/half_width
+
 # ============================================================
 # ENRICHED SOLUTION
 # ============================================================
 
 def enriched_solution( x, global_model, local_model, xL, xR):
     w = window_function( x, xL, xR)
-    return ( global_model(x) + w*local_model(x))
+    xi = local_coordinate( x, xL, xR)
+    return ( global_model(x) + w*local_model(xi))
 
 # ============================================================
 # ENRICHED RESIDUAL
@@ -139,7 +145,7 @@ def enriched_residual( x, global_model, local_model, xL, xR):
 # SAVE SOLUTION
 # ============================================================
 
-def save_solution( epoch, global_model, local_model=None, xL=None, xR=None):
+def save_solution( epoch, global_model, local_model=None, xL=None, xR=None, u_snapshot=None, x_snapshot_sol=None):
 
     x_test = ( torch.linspace(0,1,1000).view(-1,1).to(device))
 
@@ -154,6 +160,9 @@ def save_solution( epoch, global_model, local_model=None, xL=None, xR=None):
     plt.figure(figsize=(8,4))
     plt.plot( x_test.cpu().numpy(), u_exact.cpu().numpy(), label="Exact")
     plt.plot( x_test.cpu().numpy(), u_pred.cpu().numpy(), '--', label="PINN")
+    if u_snapshot is not None:
+        plt.plot( x_snapshot_sol, u_snapshot, color='steelblue', linewidth=0.5,
+                  linestyle='--', alpha=0.6, label="PINN at enrichment start")
     if xL is not None:
         plt.axvline(xL,color='k',linestyle=':')
         plt.axvline(xR,color='k',linestyle=':')
@@ -258,6 +267,12 @@ eta = np.log((global_residual(global_model, x_residual).detach().cpu().numpy().f
 eta_snapshot    = eta.copy()
 x_snapshot      = x_residual.detach().cpu().numpy().flatten()
 
+# Store snapshot of the solution at enrichment start — overlaid on Stage 2 solution plots
+x_snapshot_sol = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
+with torch.no_grad():
+    u_snapshot = global_model(x_snapshot_sol).cpu().numpy().flatten()
+x_snapshot_sol = x_snapshot_sol.cpu().numpy().flatten()
+
 # ============================================================
 # HOTSPOT DETECTION
 # ============================================================
@@ -348,7 +363,8 @@ for epoch in range(epochs_stage2):
             f"{epoch:5d} "
             f"{loss.item():.4e}"
         )
-        save_solution( epoch+epochs_stage1, global_model, local_model, xL, xR)
+        save_solution( epoch+epochs_stage1, global_model, local_model, xL, xR,
+                       u_snapshot=u_snapshot, x_snapshot_sol=x_snapshot_sol)
         save_eta_plot( epoch+epochs_stage1, global_model, local_model, xL, xR,
                        eta_snapshot=eta_snapshot, x_snapshot=x_snapshot)
 

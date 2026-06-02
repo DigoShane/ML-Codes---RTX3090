@@ -43,6 +43,9 @@ lr before decomposition is 1e-3. lr after decompositions is 1e-4.
 
 ## Version 3
 Candidate decomposition evaluation.
+-> Notice that the residue in the enrichment region has decreased a lot.
+
+
 
 ## Version 4
 Recursive adaptive refinement.
