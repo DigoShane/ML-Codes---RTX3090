@@ -278,6 +278,10 @@ for i,val in enumerate(mask):
 xL = x_residual[best_start].item()
 xR = x_residual[best_end].item()
 
+print ("Enrichment pre-min width")
+print("xL =",xL)
+print("xR =",xR)
+
 #enforcing minwidth 2% of domain length
 min_width = 0.10
 if (xR - xL) < min_width:

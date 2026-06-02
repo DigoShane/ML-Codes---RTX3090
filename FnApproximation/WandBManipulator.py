@@ -433,4 +433,19 @@ class OneLayerNetworkGUI:
 if __name__ == "__main__":
     root = tk.Tk()
     app = OneLayerNetworkGUI(root)
+
+    def on_closing():
+        try:
+            plt.close(app.fig)
+        except Exception:
+            pass
+
+        try:
+            root.quit()
+            root.destroy()
+        except Exception:
+            pass
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+
     root.mainloop()
