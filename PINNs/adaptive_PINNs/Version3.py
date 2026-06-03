@@ -64,7 +64,7 @@ def create_optimizer(parameters):
         return torch.optim.SGD( parameters, lr=learning_rate, momentum=0.0)
     else:
         raise ValueError( f"Unknown optimizer: {optimizer_type}")
-      
+ 
 print()
 print("Optimizer:", optimizer_type)
 print("Learning rate:", learning_rate)
