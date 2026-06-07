@@ -33,20 +33,13 @@ import os
 import shutil
 
 
-# ============================================================
 # DEVICE
-# ============================================================
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 
-# ============================================================
 # USER INPUT
-# ============================================================
-
 N_f = int(input("Enter number of collocation points per subdomain: "))
-
 case_choice = input("Which case do you want to run? Enter 1, 2, 3, or all: ")
 
 if case_choice.lower() == "all":
@@ -54,10 +47,7 @@ if case_choice.lower() == "all":
 else:
     cases_to_run = [int(case_choice)]
 
-# ============================================================
 # TRAINING CONTROL
-# ============================================================
-
 training_mode = input( "Training mode? Enter 'fixed' for fixed epochs or 'tol' to train until loss tolerance: ").lower()
 
 if training_mode == "fixed":
@@ -73,33 +63,23 @@ elif training_mode == "tol":
 else:
     raise ValueError("training_mode must be either 'fixed' or 'tol'.")
 
-# ============================================================
 # OUTPUT FOLDER
-# ============================================================
-
 output_root = "Version1_eval"
 os.makedirs(output_root, exist_ok=True)
 
-# ============================================================
 # PROBLEM SETUP
-# ============================================================
-
-omega = 15
+omega = 5
 helmholtz_k = 20
 
 
 def exact_solution(x):
     return torch.sin(omega * np.pi * x)
 
-
 def forcing(x):
     return ((omega * np.pi)**2 - helmholtz_k**2) * torch.sin(omega * np.pi * x)
 
 
-# ============================================================
 # PINN MODEL
-# ============================================================
-
 class PINN(nn.Module):
 
     def __init__(self):
@@ -107,20 +87,13 @@ class PINN(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(1, 64),
-            nn.ReLU(),
-
+            nn.Tanh(),
             nn.Linear(64, 64),
-            nn.ReLU(),
-
+            nn.Tanh(),
             nn.Linear(64, 64),
-            nn.ReLU(),
-
+            nn.Tanh(),
             nn.Linear(64, 1)
         )
-
-        # If ReLU fails, replace nn.ReLU() above by one of:
-        # nn.Tanh()
-        # nn.Softplus(beta=10)
 
     def forward(self, x):
         return self.net(x)
@@ -133,35 +106,15 @@ class PINN(nn.Module):
 def first_derivative(model, x):
     x_req = x.clone().detach().requires_grad_(True)
     u = model(x_req)
-
-    u_x = torch.autograd.grad(
-        u,
-        x_req,
-        grad_outputs=torch.ones_like(u),
-        create_graph=True
-    )[0]
-
+    u_x = torch.autograd.grad( u, x_req, grad_outputs=torch.ones_like(u), create_graph=True)[0]
     return u_x
 
 
 def second_derivative(model, x):
     x_req = x.clone().detach().requires_grad_(True)
     u = model(x_req)
-
-    u_x = torch.autograd.grad(
-        u,
-        x_req,
-        grad_outputs=torch.ones_like(u),
-        create_graph=True
-    )[0]
-
-    u_xx = torch.autograd.grad(
-        u_x,
-        x_req,
-        grad_outputs=torch.ones_like(u_x),
-        create_graph=True
-    )[0]
-
+    u_x = torch.autograd.grad( u, x_req, grad_outputs=torch.ones_like(u), create_graph=True)[0]
+    u_xx = torch.autograd.grad( u_x, x_req, grad_outputs=torch.ones_like(u_x), create_graph=True)[0]
     return u_xx
 
 
@@ -181,20 +134,10 @@ def pde_residual(model, x):
 # ============================================================
 
 def build_subdomains(num_subdomains, N_f):
-    """
-    Creates equally spaced subdomains of [0,1].
-
-    Returns:
-        subdomain_intervals: list of tuples [(xL,xR), ...]
-        collocation_points: list of tensors, one per subdomain
-        interface_points: list of tensors
-    """
-
     endpoints = np.linspace(0.0, 1.0, num_subdomains + 1)
 
     subdomain_intervals = []
     collocation_points = []
-
     eps = 1e-6
 
     for i in range(num_subdomains):
@@ -205,11 +148,7 @@ def build_subdomains(num_subdomains, N_f):
 
         # Interior collocation points only.
         # Boundary/interface points are handled separately.
-        x_sub = torch.linspace(
-            xL + eps,
-            xR - eps,
-            N_f
-        ).view(-1, 1).to(device)
+        x_sub = torch.linspace( xL + eps, xR - eps, N_f ).view(-1, 1).to(device)
 
         collocation_points.append(x_sub)
 
@@ -227,36 +166,22 @@ def build_subdomains(num_subdomains, N_f):
 # ============================================================
 
 def loss_function(models, collocation_points, interface_points):
-    """
-    Computes loss for arbitrary number of subdomains.
-    """
-
     num_subdomains = len(models)
 
-    # -------------------------
     # PDE loss
-    # -------------------------
-
     loss_pde = 0.0
 
     for i in range(num_subdomains):
-        loss_pde = loss_pde + torch.mean(
-            pde_residual(models[i], collocation_points[i])**2
-        )
+        loss_pde = loss_pde + torch.mean( pde_residual(models[i], collocation_points[i])**2)
 
-    # -------------------------
     # Boundary condition loss
-    # -------------------------
     # u(0)=0 and u(1)=0
-
     x0 = torch.tensor([[0.0]], device=device)
     x1 = torch.tensor([[1.0]], device=device)
 
     loss_bc = torch.mean(models[0](x0)**2) + torch.mean(models[-1](x1)**2)
 
-    # -------------------------
     # Interface continuity loss
-    # -------------------------
     # u_i(interface) = u_{i+1}(interface)
 
     loss_interface_u = 0.0
@@ -273,34 +198,18 @@ def loss_function(models, collocation_points, interface_points):
 
         loss_interface_flux = loss_interface_flux + torch.mean((ux_left - ux_right)**2)
 
-    # -------------------------
     # Total loss
-    # -------------------------
-
-    loss = (
-        loss_pde
-        + loss_bc
-        + 100.0 * loss_interface_u
-        + 10.0 * loss_interface_flux
-    )
+    loss = ( loss_pde + loss_bc + 100.0 * loss_interface_u + 10.0 * loss_interface_flux)
 
     return loss, loss_pde, loss_bc, loss_interface_u, loss_interface_flux
 
 
-# ============================================================
 # EVALUATE PIECEWISE MODEL
-# ============================================================
-
 def evaluate_piecewise(models, subdomain_intervals, x_test):
-    """
-    Evaluates the piecewise domain-decomposed PINN.
-    """
-
     u_pred = torch.zeros_like(x_test)
 
     with torch.no_grad():
         for i, (xL, xR) in enumerate(subdomain_intervals):
-
             if i == len(subdomain_intervals) - 1:
                 mask = (x_test >= xL) & (x_test <= xR)
             else:
@@ -314,33 +223,16 @@ def evaluate_piecewise(models, subdomain_intervals, x_test):
     return u_pred
 
 
-# ============================================================
 # SAVE CURRENT SOLUTION
-# ============================================================
-
-def save_current_solution(
-    models,
-    subdomain_intervals,
-    epoch,
-    case_folder
-):
+def save_current_solution( models, subdomain_intervals, epoch, case_folder):
     x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
 
     u_pred = evaluate_piecewise(models, subdomain_intervals, x_test)
     u_exact = exact_solution(x_test)
 
     plt.figure(figsize=(8, 4))
-    plt.plot(
-        x_test.cpu().numpy(),
-        u_exact.detach().cpu().numpy(),
-        label="Exact"
-    )
-    plt.plot(
-        x_test.cpu().numpy(),
-        u_pred.detach().cpu().numpy(),
-        "--",
-        label="PINN Approximation"
-    )
+    plt.plot( x_test.cpu().numpy(), u_exact.detach().cpu().numpy(), label="Exact")
+    plt.plot( x_test.cpu().numpy(), u_pred.detach().cpu().numpy(), "--", label="PINN Approximation")
 
     for xL, xR in subdomain_intervals[1:]:
         plt.axvline(xL, color="black", linestyle=":", linewidth=0.8)
@@ -351,33 +243,18 @@ def save_current_solution(
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-
-    plt.savefig(
-        f"{case_folder}/solution_epoch_{epoch:05d}.png",
-        dpi=150,
-        bbox_inches="tight"
-    )
-
+    plt.savefig( f"{case_folder}/solution_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
     plt.close()
 
 
-# ============================================================
 # SAVE RESIDUAL PLOT
-# ============================================================
-
-def save_residual_plot(
-    models,
-    subdomain_intervals,
-    epoch,
-    case_folder
-):
+def save_residual_plot( models, subdomain_intervals, epoch, case_folder):
     x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
 
     x_all = []
     residual_all = []
 
     for i, (xL, xR) in enumerate(subdomain_intervals):
-
         if i == len(subdomain_intervals) - 1:
             mask = (x_test >= xL) & (x_test <= xR)
         else:
@@ -406,20 +283,11 @@ def save_residual_plot(
     plt.title(f"PDE Residual — Epoch {epoch}")
     plt.grid(True)
     plt.tight_layout()
-
-    plt.savefig(
-        f"{case_folder}/residual_epoch_{epoch:05d}.png",
-        dpi=150,
-        bbox_inches="tight"
-    )
-
+    plt.savefig( f"{case_folder}/residual_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
     plt.close()
 
 
-# ============================================================
 # SAVE LOSS PLOT
-# ============================================================
-
 def save_loss_plot(loss_history, case_folder):
     plt.figure(figsize=(6, 4))
     plt.plot(loss_history)
@@ -430,21 +298,12 @@ def save_loss_plot(loss_history, case_folder):
     plt.grid(True)
     plt.tight_layout()
 
-    plt.savefig(
-        f"{case_folder}/loss_history.png",
-        dpi=150,
-        bbox_inches="tight"
-    )
-
+    plt.savefig( f"{case_folder}/loss_history.png", dpi=150, bbox_inches="tight")
     plt.close()
 
 
-# ============================================================
 # TRAIN ONE CASE
-# ============================================================
-
 def train_case(case_number, num_subdomains):
-
     print("\n" + "="*60)
     print(f"Running Case {case_number}: {num_subdomains} subdomain(s)")
     print("="*60)
@@ -452,11 +311,9 @@ def train_case(case_number, num_subdomains):
     case_folder = f"{output_root}/Case_{case_number}"
     if os.path.exists(case_folder):
         shutil.rmtree(case_folder)
-    
     os.makedirs(case_folder)
 
     subdomain_intervals, collocation_points, interface_points = build_subdomains( num_subdomains, N_f)
-
     models = []
 
     for _ in range(num_subdomains):
@@ -467,16 +324,11 @@ def train_case(case_number, num_subdomains):
     for model in models:
         parameters += list(model.parameters())
 
-    # --------------------------------------------------------
     # Optimizer
-    # --------------------------------------------------------
+    # optimizer = torch.optim.Adam(parameters, lr=1e-3)
+    optimizer = torch.optim.SGD(parameters, lr=1e-6)
 
-    optimizer = torch.optim.Adam(parameters, lr=1e-3)
-
-    # --------------------------------------------------------
     # Training parameters
-    # --------------------------------------------------------
-
     save_every = 100
 
     loss_history = []
@@ -485,18 +337,11 @@ def train_case(case_number, num_subdomains):
     interface_loss_history = []
     flux_loss_history = []
 
-    # --------------------------------------------------------
     # Training loop
-    # --------------------------------------------------------
-
     epoch = 0
-
     while True:
-
         optimizer.zero_grad()
-
         loss, loss_pde, loss_bc, loss_interface_u, loss_interface_flux = loss_function( models, collocation_points, interface_points)
-
         loss.backward()
         optimizer.step()
         current_loss = loss.item()
@@ -526,13 +371,9 @@ def train_case(case_number, num_subdomains):
             )
 
             save_current_solution( models, subdomain_intervals, epoch, case_folder)
-
             save_residual_plot( models, subdomain_intervals, epoch, case_folder)
 
-        # --------------------------------------------------------
         # Stopping criterion
-        # --------------------------------------------------------
-
         if training_mode == "fixed":
             if epoch >= fixed_epochs:
                 print(f"Stopping Case {case_number}: reached fixed epoch count.")
@@ -555,10 +396,7 @@ def train_case(case_number, num_subdomains):
 
         epoch += 1
 
-    # --------------------------------------------------------
     # Save loss histories
-    # --------------------------------------------------------
-
     np.savetxt(
         f"{case_folder}/loss_history.txt",
         np.column_stack([
@@ -573,39 +411,22 @@ def train_case(case_number, num_subdomains):
 
     save_loss_plot(loss_history, case_folder)
 
-    # --------------------------------------------------------
     # Final evaluation
-    # --------------------------------------------------------
-
     x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
-
     u_pred = evaluate_piecewise(models, subdomain_intervals, x_test)
     u_exact = exact_solution(x_test)
-
     error = torch.norm(u_exact - u_pred) / torch.norm(u_exact)
-
     print(f"\nCase {case_number} Relative L2 Error = {error.item():.6e}")
-
     with open(f"{case_folder}/relative_L2_error.txt", "w") as f:
         f.write(f"Relative L2 Error = {error.item():.12e}\n")
-
     save_current_solution( models, subdomain_intervals, epoch, case_folder)
-
     save_residual_plot( models, subdomain_intervals, epoch, case_folder)
-
     return error.item()
 
 
-# ============================================================
 # RUN SELECTED CASES
-# ============================================================
 
-case_to_subdomains = {
-    1: 1,
-    2: 2,
-    3: 4
-}
-
+case_to_subdomains = { 1: 1, 2: 2, 3: 4}
 errors = {}
 
 for case_number in cases_to_run:
@@ -614,10 +435,7 @@ for case_number in cases_to_run:
     errors[case_number] = error
 
 
-# ============================================================
 # SUMMARY
-# ============================================================
-
 print("\n" + "="*60)
 print("SUMMARY")
 print("="*60)
