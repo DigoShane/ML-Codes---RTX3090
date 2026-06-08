@@ -47,19 +47,26 @@ if case_choice.lower() == "all":
 else:
     cases_to_run = [int(case_choice)]
 
+# RESTART CHOICE
+restart_choice = input("Restart from saved checkpoint if available? Enter yes or no: ").lower()
+if restart_choice in ["yes", "y"]:
+    restart_from_checkpoint = True
+elif restart_choice in ["no", "n"]:
+    restart_from_checkpoint = False
+else:
+    raise ValueError("Restart choice must be yes or no.")
+
 # TRAINING CONTROL
-training_mode = input( "Training mode? Enter 'fixed' for fixed epochs or 'tol' to train until loss tolerance: ").lower()
+training_mode = input( "Training mode? Enter 'fixed' for additional epochs or 'tol' to train until loss tolerance: ").lower()
 
 if training_mode == "fixed":
-    fixed_epochs = int(input("Enter number of epochs: "))
+    additional_epochs = int(input("Enter number of additional epochs to train: "))
     loss_tolerance = None
-    max_epochs = fixed_epochs
-
+    max_epochs = None
 elif training_mode == "tol":
     loss_tolerance = float(input("Enter loss tolerance, e.g. 1e-4: "))
     max_epochs = int(input("Enter maximum allowed epochs, e.g. 50000: "))
-    fixed_epochs = None
-
+    additional_epochs = None
 else:
     raise ValueError("training_mode must be either 'fixed' or 'tol'.")
 
@@ -99,34 +106,19 @@ class PINN(nn.Module):
         return self.net(x)
 
 
-# ============================================================
 # DERIVATIVES
-# ============================================================
-
-def first_derivative(model, x):
-    x_req = x.clone().detach().requires_grad_(True)
-    u = model(x_req)
-    u_x = torch.autograd.grad( u, x_req, grad_outputs=torch.ones_like(u), create_graph=True)[0]
-    return u_x
-
-
-def second_derivative(model, x):
+def model_derivatives(model, x):
     x_req = x.clone().detach().requires_grad_(True)
     u = model(x_req)
     u_x = torch.autograd.grad( u, x_req, grad_outputs=torch.ones_like(u), create_graph=True)[0]
     u_xx = torch.autograd.grad( u_x, x_req, grad_outputs=torch.ones_like(u_x), create_graph=True)[0]
-    return u_xx
-
-
-# ============================================================
-# PDE RESIDUAL
-# ============================================================
+    return u, u_x, u_xx
 
 def pde_residual(model, x):
-    u = model(x)
-    u_xx = second_derivative(model, x)
-
+    u, _, u_xx = model_derivatives(model, x)
     return -u_xx - helmholtz_k**2 * u - forcing(x)
+
+
 
 
 # ============================================================
@@ -193,8 +185,8 @@ def loss_function(models, collocation_points, interface_points):
 
         loss_interface_u = loss_interface_u + torch.mean((u_left - u_right)**2)
 
-        ux_left = first_derivative(models[i], xi)
-        ux_right = first_derivative(models[i + 1], xi)
+        _, ux_left, _ = model_derivatives(models[i], xi)
+        _, ux_right, _ = model_derivatives(models[i + 1], xi)
 
         loss_interface_flux = loss_interface_flux + torch.mean((ux_left - ux_right)**2)
 
@@ -301,6 +293,22 @@ def save_loss_plot(loss_history, case_folder):
     plt.savefig( f"{case_folder}/loss_history.png", dpi=150, bbox_inches="tight")
     plt.close()
 
+# CHECKPOINT SAVE / LOAD
+def save_checkpoint(checkpoint_path, models, optimizer, epoch, histories):
+    checkpoint = { "epoch": epoch, "model_state_dicts": [model.state_dict() for model in models],
+                   "optimizer_state_dict": optimizer.state_dict(), "histories": histories}
+    torch.save(checkpoint, checkpoint_path)
+
+def load_checkpoint(checkpoint_path, models, optimizer):
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    for model, state_dict in zip(models, checkpoint["model_state_dicts"]):
+        model.load_state_dict(state_dict)
+
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    start_epoch = checkpoint["epoch"] + 1
+    histories = checkpoint["histories"]
+
+    return start_epoch, histories
 
 # TRAIN ONE CASE
 def train_case(case_number, num_subdomains):
@@ -309,18 +317,16 @@ def train_case(case_number, num_subdomains):
     print("="*60)
 
     case_folder = f"{output_root}/Case_{case_number}"
-    if os.path.exists(case_folder):
+    checkpoint_path = f"{case_folder}/checkpoint.pt"
+
+    if os.path.exists(case_folder) and not restart_from_checkpoint:
         shutil.rmtree(case_folder)
-    os.makedirs(case_folder)
+    os.makedirs(case_folder, exist_ok=True)
 
     subdomain_intervals, collocation_points, interface_points = build_subdomains( num_subdomains, N_f)
-    models = []
-
-    for _ in range(num_subdomains):
-        models.append(PINN().to(device))
+    models = [PINN().to(device) for _ in range(num_subdomains)]
 
     parameters = []
-
     for model in models:
         parameters += list(model.parameters())
 
@@ -328,55 +334,63 @@ def train_case(case_number, num_subdomains):
     # optimizer = torch.optim.Adam(parameters, lr=1e-3)
     optimizer = torch.optim.SGD(parameters, lr=1e-6)
 
-    # Training parameters
     save_every = 100
+    histories = { "total": [], "pde": [], "bc": [], "interface_u": [], "interface_flux": []}
+    start_epoch = 0
 
-    loss_history = []
-    pde_loss_history = []
-    bc_loss_history = []
-    interface_loss_history = []
-    flux_loss_history = []
+    if restart_from_checkpoint and os.path.exists(checkpoint_path):
+        start_epoch, histories = load_checkpoint(checkpoint_path, models, optimizer)
+        print(f"Restarted Case {case_number} from epoch {start_epoch}")
+    elif restart_from_checkpoint:
+        print(f"No checkpoint found for Case {case_number}. Starting from scratch.")
 
-    # Training loop
-    epoch = 0
+    epoch = start_epoch
+
+    if training_mode == "fixed":
+        final_epoch = start_epoch + additional_epochs
+
     while True:
         optimizer.zero_grad()
         loss, loss_pde, loss_bc, loss_interface_u, loss_interface_flux = loss_function( models, collocation_points, interface_points)
         loss.backward()
         optimizer.step()
         current_loss = loss.item()
-        loss_history.append(current_loss)
-        pde_loss_history.append(loss_pde.item())
-        bc_loss_history.append(loss_bc.item())
+
+        histories["total"].append(current_loss)
+        histories["pde"].append(loss_pde.item())
+        histories["bc"].append(loss_bc.item())
 
         if isinstance(loss_interface_u, float):
-            interface_loss_history.append(loss_interface_u)
+            histories["interface_u"].append(loss_interface_u)
         else:
-            interface_loss_history.append(loss_interface_u.item())
+            histories["interface_u"].append(loss_interface_u.item())
 
         if isinstance(loss_interface_flux, float):
-            flux_loss_history.append(loss_interface_flux)
+            histories["interface_flux"].append(loss_interface_flux)
         else:
-            flux_loss_history.append(loss_interface_flux.item())
+            histories["interface_flux"].append(loss_interface_flux.item())
 
         if epoch % save_every == 0:
             print(
                 f"Case {case_number} | "
-                f"Epoch {epoch:5d} | "
+                f"Epoch {epoch:6d} | "
                 f"Total = {current_loss:.4e} | "
                 f"PDE = {loss_pde.item():.4e} | "
                 f"BC = {loss_bc.item():.4e} | "
-                f"Interface = {interface_loss_history[-1]:.4e} | "
-                f"Flux = {flux_loss_history[-1]:.4e}"
+                f"Interface = {histories['interface_u'][-1]:.4e} | "
+                f"Flux = {histories['interface_flux'][-1]:.4e}"
             )
 
-            save_current_solution( models, subdomain_intervals, epoch, case_folder)
-            save_residual_plot( models, subdomain_intervals, epoch, case_folder)
+            save_current_solution(models, subdomain_intervals, epoch, case_folder)
+            save_residual_plot(models, subdomain_intervals, epoch, case_folder)
+            save_checkpoint(checkpoint_path, models, optimizer, epoch, histories)
 
-        # Stopping criterion
         if training_mode == "fixed":
-            if epoch >= fixed_epochs:
-                print(f"Stopping Case {case_number}: reached fixed epoch count.")
+            if epoch >= final_epoch:
+                print(
+                    f"Stopping Case {case_number}: "
+                    f"completed {additional_epochs} additional epochs."
+                )
                 break
 
         elif training_mode == "tol":
@@ -396,31 +410,40 @@ def train_case(case_number, num_subdomains):
 
         epoch += 1
 
+    # Save final checkpoint
+    save_checkpoint(checkpoint_path, models, optimizer, epoch, histories)
+
     # Save loss histories
     np.savetxt(
         f"{case_folder}/loss_history.txt",
         np.column_stack([
-            np.array(loss_history),
-            np.array(pde_loss_history),
-            np.array(bc_loss_history),
-            np.array(interface_loss_history),
-            np.array(flux_loss_history)
+            np.array(histories["total"]),
+            np.array(histories["pde"]),
+            np.array(histories["bc"]),
+            np.array(histories["interface_u"]),
+            np.array(histories["interface_flux"])
         ]),
         header="total_loss pde_loss bc_loss interface_u_loss interface_flux_loss"
     )
 
-    save_loss_plot(loss_history, case_folder)
+    save_loss_plot(histories["total"], case_folder)
 
     # Final evaluation
     x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
+
     u_pred = evaluate_piecewise(models, subdomain_intervals, x_test)
     u_exact = exact_solution(x_test)
+
     error = torch.norm(u_exact - u_pred) / torch.norm(u_exact)
+
     print(f"\nCase {case_number} Relative L2 Error = {error.item():.6e}")
+
     with open(f"{case_folder}/relative_L2_error.txt", "w") as f:
         f.write(f"Relative L2 Error = {error.item():.12e}\n")
-    save_current_solution( models, subdomain_intervals, epoch, case_folder)
-    save_residual_plot( models, subdomain_intervals, epoch, case_folder)
+
+    save_current_solution(models, subdomain_intervals, epoch, case_folder)
+    save_residual_plot(models, subdomain_intervals, epoch, case_folder)
+
     return error.item()
 
 
