@@ -40,35 +40,52 @@ print("Using device:", device)
 
 # USER INPUT
 N_f = int(input("Enter number of collocation points per subdomain: "))
-case_choice = input("Which case do you want to run? Enter 1, 2, 3, or all: ")
 
-if case_choice.lower() == "all":
+print("Which case do you want to run?")
+print("  1 - Case 1")
+print("  2 - Case 2")
+print("  3 - Case 3")
+print("  4 - All cases")
+case_input = int(input("Enter choice (1/2/3/4): "))
+
+if case_input == 4:
     cases_to_run = [1, 2, 3]
+elif case_input in [1, 2, 3]:
+    cases_to_run = [case_input]
 else:
-    cases_to_run = [int(case_choice)]
+    raise ValueError("Case choice must be 1, 2, 3, or 4.")
 
 # RESTART CHOICE
-restart_choice = input("Restart from saved checkpoint if available? Enter yes or no: ").lower()
-if restart_choice in ["yes", "y"]:
+print("Restart from saved checkpoint if available?")
+print("  1 - Yes")
+print("  2 - No")
+restart_input = int(input("Enter choice (1/2): "))
+
+if restart_input == 1:
     restart_from_checkpoint = True
-elif restart_choice in ["no", "n"]:
+elif restart_input == 2:
     restart_from_checkpoint = False
 else:
-    raise ValueError("Restart choice must be yes or no.")
+    raise ValueError("Restart choice must be 1 or 2.")
 
 # TRAINING CONTROL
-training_mode = input( "Training mode? Enter 'fixed' for additional epochs or 'tol' to train until loss tolerance: ").lower()
+print("Training mode?")
+print("  1 - Fixed epochs")
+print("  2 - Train until loss tolerance")
+training_input = int(input("Enter choice (1/2): "))
 
-if training_mode == "fixed":
+if training_input == 1:
+    training_mode = "fixed"
     additional_epochs = int(input("Enter number of additional epochs to train: "))
     loss_tolerance = None
     max_epochs = None
-elif training_mode == "tol":
+elif training_input == 2:
+    training_mode = "tol"
     loss_tolerance = float(input("Enter loss tolerance, e.g. 1e-4: "))
     max_epochs = int(input("Enter maximum allowed epochs, e.g. 50000: "))
     additional_epochs = None
 else:
-    raise ValueError("training_mode must be either 'fixed' or 'tol'.")
+    raise ValueError("Training mode must be 1 or 2.")
 
 # OUTPUT FOLDER
 output_root = "Version1_eval"
@@ -119,12 +136,9 @@ def pde_residual(model, x):
     return -u_xx - helmholtz_k**2 * u - forcing(x)
 
 
-
-
 # ============================================================
 # BUILD SUBDOMAINS
 # ============================================================
-
 def build_subdomains(num_subdomains, N_f):
     endpoints = np.linspace(0.0, 1.0, num_subdomains + 1)
 
@@ -175,7 +189,6 @@ def loss_function(models, collocation_points, interface_points):
 
     # Interface continuity loss
     # u_i(interface) = u_{i+1}(interface)
-
     loss_interface_u = 0.0
     loss_interface_flux = 0.0
 
@@ -191,7 +204,7 @@ def loss_function(models, collocation_points, interface_points):
         loss_interface_flux = loss_interface_flux + torch.mean((ux_left - ux_right)**2)
 
     # Total loss
-    loss = ( loss_pde + loss_bc + 100.0 * loss_interface_u + 10.0 * loss_interface_flux)
+    loss = ( loss_pde + loss_bc + 100.0*loss_interface_u + 10.0*loss_interface_flux)
 
     return loss, loss_pde, loss_bc, loss_interface_u, loss_interface_flux
 
@@ -304,7 +317,6 @@ def load_checkpoint(checkpoint_path, models, optimizer):
     for model, state_dict in zip(models, checkpoint["model_state_dicts"]):
         model.load_state_dict(state_dict)
 
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     start_epoch = checkpoint["epoch"] + 1
     histories = checkpoint["histories"]
 
@@ -331,8 +343,8 @@ def train_case(case_number, num_subdomains):
         parameters += list(model.parameters())
 
     # Optimizer
-    # optimizer = torch.optim.Adam(parameters, lr=1e-3)
-    optimizer = torch.optim.SGD(parameters, lr=1e-6)
+    optimizer = torch.optim.Adam(parameters, lr=1e-3)
+    # optimizer = torch.optim.SGD(parameters, lr=1e-7, momentum=0.0)
 
     save_every = 100
     histories = { "total": [], "pde": [], "bc": [], "interface_u": [], "interface_flux": []}
