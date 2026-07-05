@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 import os
 import shutil
 
+from initialize import initialize_from_function
 
 # DEVICE
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -101,6 +102,55 @@ def exact_solution(x):
 
 def forcing(x):
     return ((omega * np.pi)**2 - helmholtz_k**2) * torch.sin(omega * np.pi * x)
+
+# INITIALIZATION CONTROL
+print("Function-based initialization?")
+print("Currently supported only for Case 1: one neural network on [0,1].")
+print("  0 - No, use the default PyTorch initialization currently being used")
+print("  1 - Yes, initialize the single network by fitting a target function, then add Gaussian noise")
+initialization_input = int(input("Enter choice (0/1): "))
+
+if initialization_input == 0:
+    use_function_initialization = False
+    initialization_function_expression = None
+    initialization_noise_std = 0.0
+    initialization_num_points = None
+    initialization_fit_epochs = None
+    initialization_lr = None
+
+elif initialization_input == 1:
+    use_function_initialization = True
+
+    if cases_to_run != [1]:
+        raise ValueError(
+            "Function-based initialization is currently implemented only for Case 1. "
+            "Choose Case 1, or choose initialization option 0."
+        )
+
+    print("Enter the target function for initialization.")
+    print("Examples:")
+    print("  exact solution -> sin({omega}*pi*x)")
+    print("  torch.sin(omega*np.pi*x)")
+    initialization_function_expression = input("Target function: ").strip()
+    initialization_noise_std = float( input("Enter Gaussian noise standard deviation to add after initialization, e.g. 0.01: ") )
+    initialization_num_points = int( input("Enter number of points for initialization fit, e.g. 2000: ") )
+    initialization_fit_epochs = int( input("Enter number of initialization fitting epochs, e.g. 5000: ") )
+    initialization_lr = float( input("Enter initialization fitting learning rate, e.g. 1e-3: ") )
+
+else:
+    raise ValueError("Initialization choice must be 0 or 1.")
+
+def build_initialization_target_function(expression):
+    # Convert a user-entered expression into a callable target_function(x).
+
+    expression = expression.strip()
+
+    def target_function(x):
+        allowed_namespace = { "x": x, "torch": torch, "np": np, "omega": omega, 
+                              "helmholtz_k": helmholtz_k, "exact_solution": exact_solution }
+        return eval(expression, {"__builtins__": {}}, allowed_namespace)
+
+    return target_function
 
 
 # PINN MODEL
@@ -347,14 +397,67 @@ def train_case(case_number, num_subdomains):
     # optimizer = torch.optim.SGD(parameters, lr=1e-7, momentum=0.0)
 
     save_every = 100
+    #histories = { "total": [], "pde": [], "bc": [], "interface_u": [], "interface_flux": []}
+    #start_epoch = 0
+
+    #if restart_from_checkpoint and os.path.exists(checkpoint_path):
+    #    start_epoch, histories = load_checkpoint(checkpoint_path, models, optimizer)
+    #    print(f"Restarted Case {case_number} from epoch {start_epoch}")
+    #elif restart_from_checkpoint:
+    #    print(f"No checkpoint found for Case {case_number}. Starting from scratch.")
     histories = { "total": [], "pde": [], "bc": [], "interface_u": [], "interface_flux": []}
     start_epoch = 0
+    loaded_checkpoint = False
 
     if restart_from_checkpoint and os.path.exists(checkpoint_path):
         start_epoch, histories = load_checkpoint(checkpoint_path, models, optimizer)
+        loaded_checkpoint = True
         print(f"Restarted Case {case_number} from epoch {start_epoch}")
     elif restart_from_checkpoint:
         print(f"No checkpoint found for Case {case_number}. Starting from scratch.")
+
+    # FUNCTION-BASED INITIALIZATION
+    # This is applied only when:
+    #   1. the user requested function-based initialization,
+    #   2. we are running Case 1 / one neural network,
+    #   3. we did NOT load a checkpoint.
+
+    if use_function_initialization and not loaded_checkpoint:
+
+        if num_subdomains != 1:
+            raise ValueError( "Function-based initialization is currently supported only for one neural network." )
+
+        target_function = build_initialization_target_function( initialization_function_expression )
+
+        print("\nApplying function-based initialization to the single Case 1 network...")
+
+        init_info = initialize_from_function(
+         model=models[0],
+         target_function=target_function,
+         x_min=0.0,
+         x_max=1.0,
+         num_points=initialization_num_points,
+         fit_epochs=initialization_fit_epochs,
+         lr=initialization_lr,
+         noise_std=initialization_noise_std,
+         device=device,
+         print_every=max(1, initialization_fit_epochs // 5),
+         plot_path=f"{case_folder}/initialization_fit_before_noise.png",
+         plot_title=f"Initialization fit before noise: {initialization_function_expression}",
+        )
+
+        with open(f"{case_folder}/initialization_info.txt", "w") as f:
+            f.write(f"target_function = {initialization_function_expression}\n")
+            for key, value in init_info.items():
+                f.write(f"{key} = {value}\n")
+
+        print("Finished function-based initialization.")
+        print(f"Initialization fit MSE before noise = {init_info['final_fit_mse_before_noise']:.4e}")
+        print(f"Gaussian noise std added after fit = {initialization_noise_std:.4e}\n")
+
+    elif use_function_initialization and loaded_checkpoint:
+        print("Checkpoint was loaded, so function-based initialization is skipped.")    
+
 
     epoch = start_epoch
 

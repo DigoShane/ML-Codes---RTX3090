@@ -1,1 +1,0 @@
-Relative L2 Error = 1.193947643042e-01
