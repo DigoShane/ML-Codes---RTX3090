@@ -44,7 +44,7 @@ lr before decomposition is 1e-3. lr after decompositions is 1e-4.
 ## Version 3
 Candidate decomposition evaluation.
 -> Notice that the residue in the enrichment region has decreased a lot.
--> also i figured out that the oscillations in the loss is due to momentum. 
+-> also I figured out that the oscillations in the loss is due to momentum. 
    Does this mean that the actual loss function is non-convex with multiple minima?
 
 
