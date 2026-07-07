@@ -393,18 +393,10 @@ def train_case(case_number, num_subdomains):
         parameters += list(model.parameters())
 
     # Optimizer
-    optimizer = torch.optim.Adam(parameters, lr=1e-3)
-    # optimizer = torch.optim.SGD(parameters, lr=1e-7, momentum=0.0)
+    #optimizer = torch.optim.Adam(parameters, lr=1e-3)
+    optimizer = torch.optim.SGD(parameters, lr=1e-10, momentum=0.0)
 
     save_every = 100
-    #histories = { "total": [], "pde": [], "bc": [], "interface_u": [], "interface_flux": []}
-    #start_epoch = 0
-
-    #if restart_from_checkpoint and os.path.exists(checkpoint_path):
-    #    start_epoch, histories = load_checkpoint(checkpoint_path, models, optimizer)
-    #    print(f"Restarted Case {case_number} from epoch {start_epoch}")
-    #elif restart_from_checkpoint:
-    #    print(f"No checkpoint found for Case {case_number}. Starting from scratch.")
     histories = { "total": [], "pde": [], "bc": [], "interface_u": [], "interface_flux": []}
     start_epoch = 0
     loaded_checkpoint = False

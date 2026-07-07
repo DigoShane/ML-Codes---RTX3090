@@ -1,6 +1,6 @@
 target_function = torch.sin(omega*np.pi*x)
-final_fit_mse_before_noise = 5.03527007822413e-06
-noise_std = 0.1
+final_fit_mse_before_noise = 5.28536838828586e-06
+noise_std = 0.001
 num_points = 400
 fit_epochs = 5000
 lr = 0.001
