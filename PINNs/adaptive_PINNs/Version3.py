@@ -141,6 +141,7 @@ def global_residual(model,x):
 def window_function(x, xL, xR, delta=0.02):
     #return 0.5*( torch.tanh((x-xL)/delta) - torch.tanh((x-xR)/delta) )
     return ((x >= xL) & (x <= xR)).float() #characteristic function window.
+                                #.float() is a pytorch method to case tensors to floating point nos.
 
 def local_coordinate(x, xL, xR):
     center = 0.5*(xL+xR)
@@ -165,7 +166,7 @@ def enriched_residual( x, global_model, local_model, xL, xR):
     x_req = ( x.clone().detach().requires_grad_(True))
     u = enriched_solution( x_req, global_model, local_model, xL, xR)
     ux = torch.autograd.grad( u, x_req, grad_outputs=torch.ones_like(u), create_graph=True)[0]
-    uxx = torch.autograd.grad(ux,x_req, grad_outputs=torch.ones_like(ux),create_graph=True)[0]
+    uxx = torch.autograd.grad(ux, x_req, grad_outputs=torch.ones_like(ux),create_graph=True)[0]
 
     return ( -uxx - helmholtz_k**2*u - forcing(x_req))
 
@@ -191,7 +192,7 @@ def save_solution( epoch, global_model, local_model=None, xL=None, xR=None, u_sn
     if u_snapshot is not None:
         plt.plot( x_snapshot_sol, u_snapshot, color='steelblue', linewidth=0.5,
                   linestyle='--', alpha=0.6, label="PINN at enrichment start")
-    if xL is not None:
+    if xL is not None:# if window is active, then draw 2 vertical lines at xL and xR.
         plt.axvline(xL,color='k',linestyle=':')
         plt.axvline(xR,color='k',linestyle=':')
     plt.legend()
@@ -250,13 +251,14 @@ def save_eta_plot(epoch, global_model, local_model=None, xL=None, xR=None, eta_s
 # ============================================================
 
 global_model = PINN().to(device)
-optimizer = create_optimizer( global_model.parameters())
+optimizer = create_optimizer( global_model.parameters()) # we defined create_optimizer in line #55.
 loss_history = []
 epochs_stage1 = 5000
 window = 500
 stagnation_tol = 1e-3
 
 for epoch in range(epochs_stage1):
+    #skiping model.tain()
     optimizer.zero_grad()
     r = global_residual( global_model, x_global)
     loss_pde = torch.mean(r**2)
