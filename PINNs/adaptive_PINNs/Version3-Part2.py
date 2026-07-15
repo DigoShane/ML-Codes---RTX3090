@@ -404,9 +404,7 @@ def save_global_eta_plot(epoch, global_model):
 
 def save_trainable_window_plot(local_model, epoch):
     x_plot = torch.linspace(x_min, x_max, 2000).view(-1, 1).to(device)
-
     local_model.eval()
-
     with torch.no_grad():
         w_plot = local_model.window(x_plot)
         xL_current, xR_current, beta_current = local_model.window_parameters()
@@ -636,9 +634,228 @@ else:
     optimizer = make_optimizer(global_model, None)
 
 
+# Stage 1: Global TRaining
+if not restart_from_checkpoint: # not restarting from checkpoint means we are training the single NN.
+
+    print()
+    print("=" * 60)
+    print("STAGE 1: GLOBAL TRAINING")
+    print("=" * 60)
+    print()
+
+    stagnation_detected = False
+
+    # 1. For epoch in range
+    # 2. Call model dot train
+    # 3. Do the forward pass
+    # 4. Calculate the Lass (loss)
+    # 5. Optimizer zero (grad)
+    # 6. Loss backwards
+    # 7. Optimizer step
+    # Testing 
+    # 1. Call model dot eval
+    # 2. With torch infarance mall (inference mode)
+    # 3. Do the forward pass
+    # 4. Calculate the lass (loss)
+    # Print out what's happening
+
+    for epoch in range(epochs_stage1):
+        global_model.train() # forward pass calculated via "u = global_model(x_req)" called via global_loss, which calls pde_residual, which contains this.
+        loss, loss_pde, loss_bc = global_loss(global_model) 
+        optimizer.zero_grad() #?? This was initially above
+        loss.backward()
+        optimizer.step()
+
+        loss_history_stage1.append(loss.item()) # This is the testing loop since we are not doing supervised learning.
+
+        if epoch % save_every == 0: # print out whats happening+ Testing ( but only at certain points).
+            global_model.eval()
+            with torch.no_grad():
+                x_test = torch.linspace(x_min, x_max, 1000).view(-1, 1).to(device)
+                u_pred = global_model(x_test)
+                u_exact = exact_solution(x_test)
+                rel_error = torch.norm(u_exact - u_pred) / torch.norm(u_exact) 
+                # this is exactly what the testing was doing in the supervised learning problem.
+
+            print(
+                f"[GLOBAL] "
+                f"Epoch {epoch:6d} | "
+                f"Loss = {loss.item():.4e} | "
+                f"PDE = {loss_pde.item():.4e} | "
+                f"BC = {loss_bc.item():.4e} | "
+                f"RelL2 = {rel_error.item():.4e}")
+
+            save_global_solution(epoch, global_model)
+            save_global_eta_plot(epoch, global_model)
+
+        if check_stagnation( loss_history_stage1, window, stagnation_tol, stagnation_loss_threshold):
+            print()
+            print("STAGNATION DETECTED DURING GLOBAL TRAINING")
+            print(f"Stopping Stage 1 at epoch {epoch}")
+            print()
+
+            stagnation_detected = True
+            break
+
+    stage1_end_epoch = len(loss_history_stage1) - 1
+
+    if not stagnation_detected:
+        print()
+        print("Stage 1 reached maximum epochs without stagnation.")
+        print("Introducing local model anyway.")
+        print()
+
+
+# LOCAL MODEL CREATION
+if not restart_from_checkpoint: # This will be executed immediately after the global training whether stagnation was detected or not.
+    print()
+    print("=" * 60)
+    print("CREATING LOCAL MODEL")
+    print("=" * 60)
+    print()
+
+    xL_init, xR_init = initial_local_window()
+    print("Initial local window guess:")
+    print("xL_init =", xL_init)
+    print("xR_init =", xR_init)
+    print()
+
+    x_snapshot_sol_torch = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
+    global_model.eval()
+    with torch.no_grad():
+        u_snapshot = global_model(x_snapshot_sol_torch).cpu().numpy().flatten()
+
+    x_snapshot_sol = x_snapshot_sol_torch.cpu().numpy().flatten()
+    local_model = WindowedLocalPINN( xL_init=xL_init, xR_init=xR_init, beta_init=beta_init).to(device)
+    project_window_parameters(local_model) # project xL and xR to within the domain.
+    optimizer = make_optimizer(global_model, local_model)
+
+    save_trainable_window_plot(local_model, stage1_end_epoch)
+
+    save_checkpoint( checkpoint_path, global_model, local_model, optimizer, stage1_end_epoch, loss_history_stage1, 
+                     loss_history_stage2, x_snapshot_sol, u_snapshot)
+
+
+# Stage 2: Enricheed TRaining
+print()
+print("=" * 60)
+print("STAGE 2: ENRICHED TRAINING")
+print("=" * 60)
+print()
+
+if local_model is None:
+    raise RuntimeError("local_model is None. Cannot run Stage 2.")
+
+# This is how resumability is defined for stage 2.
+start_epoch_stage2 = len(loss_history_stage2) # When stage 2 runs for the 1st time, this is 0.
+final_epoch_stage2 = start_epoch_stage2 + additional_stage2_epochs
+
+# Training over only the additional_stage2_epochs
+for epoch in range(start_epoch_stage2, final_epoch_stage2):
+    global_model.train()
+    local_model.train()
+    loss, loss_pde, loss_bc = enriched_loss(global_model, local_model)
+    optimizer.zero_grad()
+    if torch.isnan(loss):
+        print("NaN detected during enriched training.")
+        break
+    loss.backward()
+    optimizer.step()
+
+    project_window_parameters(local_model)
+    loss_history_stage2.append(loss.item())
+
+    total_epoch = stage1_end_epoch + epoch
+
+    # Testing time.
+    if epoch % save_every == 0:
+        global_model.eval()
+        local_model.eval()
+
+        with torch.no_grad():
+            x_test = torch.linspace(x_min, x_max, 1000).view(-1, 1).to(device)
+            u_pred = enriched_solution(x_test, global_model, local_model)
+            u_exact = exact_solution(x_test)
+            rel_error = torch.norm(u_exact - u_pred) / torch.norm(u_exact)
+
+            xL_current, xR_current, beta_current = local_model.window_parameters()
+
+        print(
+            f"[ENRICHED] "
+            f"Total epoch = {total_epoch:6d} | "
+            f"Stage2 epoch = {epoch:6d} | "
+            f"Loss = {loss.item():.4e} | "
+            f"PDE = {loss_pde.item():.4e} | "
+            f"BC = {loss_bc.item():.4e} | "
+            f"RelL2 = {rel_error.item():.4e} | "
+            f"xL = {xL_current.item():.4f} | "
+            f"xR = {xR_current.item():.4f} | "
+            f"beta = {beta_current.item():.2f}"
+        )
+
+        save_enriched_solution( total_epoch, global_model, local_model, u_snapshot=u_snapshot, x_snapshot=x_snapshot_sol)
+        save_enriched_eta_plot( total_epoch, global_model, local_model)
+        save_trainable_window_plot(local_model, total_epoch)
+        save_checkpoint( checkpoint_path, global_model, local_model, optimizer, stage1_end_epoch, loss_history_stage1,
+                         loss_history_stage2, x_snapshot_sol, u_snapshot)
 
 
 
+# FInal Error
+x_test = torch.linspace(x_min, x_max, 2000).view(-1, 1).to(device)
+global_model.eval()
+local_model.eval()
+
+with torch.no_grad():
+    u_pred = enriched_solution(x_test, global_model, local_model)
+    u_exact = exact_solution(x_test)
+relative_L2_error = torch.norm(u_exact - u_pred) / torch.norm(u_exact)
+
+print()
+print("FINAL RELATIVE L2 ERROR")
+print(relative_L2_error.item())
+
+with open(f"{output_folder}/final_error.txt", "w") as f:
+    f.write(f"Final relative L2 error = {relative_L2_error.item():.12e}\n")
+
+
+
+# Save Loss History
+n1 = len(loss_history_stage1)
+n2 = len(loss_history_stage2)
+
+plt.figure(figsize=(10, 4))
+
+if n1 > 0:
+    plt.plot( np.arange(n1), loss_history_stage1, label="Stage 1: Global")
+if n2 > 0:
+    plt.plot( np.arange(n1, n1 + n2), loss_history_stage2, label="Stage 2: Enriched")
+if n1 > 0 and n2 > 0:
+    plt.axvline( n1, color="black", linestyle=":", linewidth=1.0, label="Enrichment start")
+
+plt.yscale("log")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Loss history")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig( f"{output_folder}/loss_history.png", dpi=150, bbox_inches="tight")
+plt.close()
+
+
+if n1 > 0:
+    np.savetxt( f"{output_folder}/loss_history_stage1.txt", np.array(loss_history_stage1), header="stage1_global_loss")
+if n2 > 0:
+    np.savetxt( f"{output_folder}/loss_history_stage2.txt", np.array(loss_history_stage2), header="stage2_enriched_loss")
+
+
+
+# Save Check point
+save_checkpoint( checkpoint_path, global_model, local_model, optimizer, stage1_end_epoch, loss_history_stage1,
+                 loss_history_stage2, x_snapshot_sol, u_snapshot)
+print()
+print(f"Saved all results in: {output_folder}")
 
 
 # printing out the global and local model dict just to see how things are stored.
