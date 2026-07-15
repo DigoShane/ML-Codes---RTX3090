@@ -176,7 +176,7 @@ class PINN(nn.Module):
 
 ## Anything part of nn.parameters is trainable (also requires_grad = true)
 
-class WindowedLocalPINN(nn.Module):  #n#
+class WindowedLocalPINN(nn.Module): 
     """
     Simple 1D windowed local correction model.
     It represents: u_local_windowed(x) = W(x) * NN_local(xi)
@@ -286,6 +286,7 @@ def make_optimizer(global_model, local_model=None):
         parameters = global_model.parameters()
     else:
         parameters = list(global_model.parameters()) + list(local_model.parameters())
+        # model.parameters() is a generator so wrapping in list to enable adding them.
 
     return create_optimizer(parameters, optimizer_type, learning_rate)
 
@@ -532,14 +533,25 @@ def create_local_model_from_checkpoint(checkpoint):
         raise RuntimeError( "Checkpoint does not contain a local model. "
             "Restart is only supported for Stage 2.")
 
+    # Since we used "self.xL = nn.Parameter(torch.tensor([[xL_init]], ...))", it is now a parameter tracked by the dict.
     xL_loaded = state_dict["xL"].item() # .item() extracts std Python number out of the 0-dimensional PyTorch tensor.
     width_fraction_loaded = state_dict["width_fraction"].item()
     xR_loaded = xL_loaded + width_fraction_loaded
+    #creating a new model for the next re-run.
     local_model = WindowedLocalPINN( xL_init=xL_loaded, xR_init=xR_loaded, beta_init=beta_init).to(device)
     local_model.load_state_dict(state_dict)
 
     return local_model
 
+# torch.load 's map_location=device -> when a checkpoint is saved, each tensor inside it remembers which device it was on at 
+#                                      save time (e.g., "cuda:0"). If you later try to load that checkpoint on a machine/session 
+#                                      where that exact device isn't available (e.g., you saved on GPU but are now loading on a 
+#                                      CPU-only machine, or a machine with different GPU indexing), torch.load would otherwise 
+#                                      try to recreate tensors on the original device and crash if that device doesn't exist. 
+#                                      map_location=device tells torch.load to remap every tensor to the specified device as 
+#                                      it's loaded, overriding whatever device it was originally saved on — ensuring the loaded 
+#                                      checkpoint always lands correctly on whatever device your current script is using 
+#                                      (CPU or GPU), regardless of where it was originally saved. 
 
 def load_checkpoint_models(checkpoint_path, global_model):
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -563,10 +575,13 @@ def maybe_load_optimizer_state(checkpoint, optimizer, load_optimizer_state):
     # In the dict, the value corresponds to adam, sgd or gd.
     checkpoint_optimizer_type = checkpoint.get("checkpoint_optimizer_type", None) 
     checkpoint_learning_rate = checkpoint.get("checkpoint_learning_rate", None)
+    # dict.get(key, default) looks up key; if the key exists, it returns the corresponding value;
+    # if the key does not exist, instead of raising a KeyError (which checkpoint["checkpoint_optimizer_type"] would do), 
+    # it returns the default you provided — here, None.
 
     #The following evaluate to true or flase values.
-    same_optimizer = checkpoint_optimizer_type == optimizer_type
-    same_lr = checkpoint_learning_rate == learning_rate
+    same_optimizer = ( checkpoint_optimizer_type == optimizer_type )
+    same_lr = ( checkpoint_learning_rate == learning_rate )
 
     if same_optimizer and same_lr: # both true. 
         try:
@@ -626,7 +641,14 @@ else:
 
 
 
+# printing out the global and local model dict just to see how things are stored.
+print("=== Global model state_dict ===")
+for key, tensor in global_model.state_dict().items():
+    print(key, tensor.shape)
 
+print("=== Local model state_dict ===")
+for key, tensor in local_model.state_dict().items():
+    print(key, tensor.shape)
 
 
 
