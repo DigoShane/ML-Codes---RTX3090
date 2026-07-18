@@ -427,6 +427,7 @@ def save_trainable_window_plot(local_model, epoch):
     plt.savefig( f"{output_folder}/window_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight" )
     plt.close()
 
+# x_snapshot 
 
 def save_enriched_solution( epoch, global_model, local_model, xL, xR, u_snapshot=None, x_snapshot=None):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
@@ -605,6 +606,7 @@ local_model = None
 loss_history_stage1 = []
 loss_history_stage2 = []
 
+# We store where stage1 ends. Then when we count epochs in stage 2. This is then used to define total_epoch, which stores the total no. of epoch throughout.
 stage1_end_epoch = 0
 
 x_snapshot_sol = None
@@ -725,7 +727,7 @@ if not restart_from_checkpoint: # This will be executed immediately after the gl
     with torch.no_grad():
         u_snapshot = global_model(x_snapshot_sol_torch).cpu().numpy().flatten()
 
-    x_snapshot_sol = x_snapshot_sol_torch.cpu().numpy().flatten()
+    x_snapshot_sol = x_snapshot_sol_torch.cpu().numpy().flatten() # this will be passed as x_snapshot soln to save_enriched_solution.
     local_model = WindowedLocalPINN( xL_init=xL_init, xR_init=xR_init, beta_init=beta_init).to(device)
     project_window_parameters(local_model) # project xL and xR to within the domain.
     optimizer = make_optimizer(global_model, local_model)
@@ -736,14 +738,14 @@ if not restart_from_checkpoint: # This will be executed immediately after the gl
                      loss_history_stage2, x_snapshot_sol, u_snapshot)
 
 
-# Stage 2: Enricheed TRaining
+# Stage 2: Enriched TRaining
 print()
 print("=" * 60)
 print("STAGE 2: ENRICHED TRAINING")
 print("=" * 60)
 print()
 
-if local_model is None:
+if local_model is None: # we just defined the local model above.
     raise RuntimeError("local_model is None. Cannot run Stage 2.")
 
 # This is how resumability is defined for stage 2.
