@@ -78,6 +78,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
 
 # User options
+batch_choice = input("Enter minibatch size (or press Enter for full-batch): ").strip()
+batch_size = int(batch_choice) if batch_choice else None
+
 output_folder = "Version3-Part2_eval"
 
 restart_choice = input("Restart from checkpoint? Enter yes or no: ").lower()
@@ -158,6 +161,12 @@ x_global = torch.linspace(0.0, 1.0, N_f).view(-1, 1).to(device)
 x0 = torch.tensor([[0.0]], device=device)
 x1 = torch.tensor([[1.0]], device=device)
 
+
+def get_collocation_batch(x_pool, batch_size):
+    if batch_size is None or batch_size >= x_pool.shape[0]:
+        return x_pool
+    idx = torch.randperm(x_pool.shape[0], device=x_pool.device)[:batch_size]
+    return x_pool[idx]
 
 # NN
 class PINN(nn.Module):
@@ -342,8 +351,8 @@ def enriched_residual(x, global_model, local_model):
 
 
 # Loss Fn
-def global_loss(global_model):
-    r = global_residual(global_model, x_global)
+def global_loss(global_model, x_batch):
+    r = global_residual(global_model, x_batch)
     loss_pde = torch.mean(r**2)
     loss_bc = ( torch.mean(global_model(x0)**2) + torch.mean(global_model(x1)**2) )
     loss = loss_pde + loss_bc
@@ -351,8 +360,8 @@ def global_loss(global_model):
     return loss, loss_pde, loss_bc
 
 
-def enriched_loss(global_model, local_model):
-    r = enriched_residual(x_global, global_model, local_model)
+def enriched_loss(global_model, local_model, x_batch):
+    r = enriched_residual(x_batch, global_model, local_model)
     loss_pde = torch.mean(r**2)
     u0 = enriched_solution(x0, global_model, local_model)
     u1 = enriched_solution(x1, global_model, local_model)
@@ -479,7 +488,7 @@ def save_enriched_solution( epoch, global_model, local_model, xL, xR, u_snapshot
     plt.close()
 
 
-def save_enriched_eta_plot( epoch, global_model, local_model, xL, xR, x_eta_snapshot=None, eta_snapshot=None):
+def save_enriched_eta_plot( epoch, global_model, local_model):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
     r = enriched_residual(x_test, global_model, local_model, xL, xR)
     eta = residual_indicator_from_residual(r)
@@ -498,26 +507,6 @@ def save_enriched_eta_plot( epoch, global_model, local_model, xL, xR, x_eta_snap
     plt.grid(True)
     plt.tight_layout()
     plt.savefig( f"{output_folder}/enriched_eta_epoch_{epoch:05d}.png", dpi=150, box_inches="tight")
-    plt.close()
-
-
-# plots the window.
-def save_window_plot(xL, xR):
-    x_plot = torch.linspace(0.0, 1.0, 2000).view(-1, 1).to(device)
-
-    w_plot = window_function(x_plot, xL, xR)
-    plt.figure(figsize=(8, 4))
-
-    plt.plot( x_plot.cpu().numpy(), w_plot.cpu().numpy(), label="Window")
-    plt.axvline(xL, color="black", linestyle=":", linewidth=0.8)
-    plt.axvline(xR, color="black", linestyle=":", linewidth=0.8)
-    plt.xlabel("x")
-    plt.ylabel("w(x)")
-    plt.title("Characteristic enrichment window")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig( f"{output_folder}/enrichment_window.png", dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -686,7 +675,8 @@ if not restart_from_checkpoint: # not restarting from checkpoint means we are tr
 
     for epoch in range(epochs_stage1):
         global_model.train() # forward pass calculated via "u = global_model(x_req)" called via global_loss, which calls pde_residual, which contains this.
-        loss, loss_pde, loss_bc = global_loss(global_model) 
+        x_batch = get_collocation_batch(x_global, batch_size)
+        loss, loss_pde, loss_bc = global_loss(global_model, x_batch) 
         optimizer.zero_grad() #?? This was initially above
         loss.backward()
         optimizer.step()
@@ -785,7 +775,8 @@ final_epoch_stage2 = start_epoch_stage2 + additional_stage2_epochs
 for epoch in range(start_epoch_stage2, final_epoch_stage2):
     global_model.train()
     local_model.train()
-    loss, loss_pde, loss_bc = enriched_loss(global_model, local_model)
+    x_batch = get_collocation_batch(x_global, batch_size)
+    loss, loss_pde, loss_bc = enriched_loss(global_model, local_model, x_batch)
     optimizer.zero_grad()
     if torch.isnan(loss):
         print("NaN detected during enriched training.")
