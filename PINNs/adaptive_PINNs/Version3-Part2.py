@@ -147,6 +147,11 @@ hotspot_min_width = 0.10
 beta_init = 100.0
 
 
+# This is only an initial guess; xL and xR will be learned.
+initial_window_left_fraction = 0.10
+initial_window_right_fraction = 0.90
+
+
 # COLLOCATION AND BOUNDARY POINTS
 x_global = torch.linspace(0.0, 1.0, N_f).view(-1, 1).to(device)
 
@@ -268,6 +273,17 @@ def project_window_parameters(local_model):
         local_model.width_fraction.clamp_(1e-4, 1.0 - 1e-4)
 
 
+#Define initial local window
+def initial_local_window():
+    xL_init = initial_window_left_fraction
+    xR_init = initial_window_right_fraction
+
+    if xR_init <= xL_init:
+        raise ValueError("Initial local window must satisfy xR_init > xL_init.")
+
+    return xL_init, xR_init
+
+
 # Optimizer factory
 def create_optimizer(parameters, optimizer_type, learning_rate):
     if optimizer_type == "adam":
@@ -281,6 +297,7 @@ def create_optimizer(parameters, optimizer_type, learning_rate):
     else:
         raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
+# This is the right way to define optimizer. See the 1D toy example for linear regression: https://github.com/DigoShane/GitHub-ML/blob/main/Training_the_sum_of_2_NN's.ipynb
 def make_optimizer(global_model, local_model=None):
     if local_model is None:
         parameters = global_model.parameters()
@@ -348,7 +365,7 @@ def enriched_loss(global_model, local_model):
 #residual indicator
 def residual_indicator_from_residual(r):
     r_sq = r.detach()**2
-    # commented out
+    # commented out. Choose one or the other.
     #grad_r = torch.autograd.grad( r, x, grad_outputs=torch.ones_like(r), create_graph=False, retain_graph=True)[0]
     grad_r_sq = 0 # grad_r.detach()**2
     eta = r_sq + grad_r_sq 
@@ -359,13 +376,13 @@ def residual_indicator_from_residual(r):
     return eta
 
 
-# Saving and plotting
+# Saving and plotting. Called during Stage 1.
 def save_global_solution(epoch, global_model):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
 
     global_model.eval()
 
-    with torch.no_grad():
+    with torch.inference_mode():
         u_pred = global_model(x_test)
         u_exact = exact_solution(x_test)
 
@@ -382,6 +399,7 @@ def save_global_solution(epoch, global_model):
     plt.close()
 
 
+# Called during Stage 1, where global model applies.
 def save_global_eta_plot(epoch, global_model):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
 
@@ -402,10 +420,13 @@ def save_global_eta_plot(epoch, global_model):
     plt.savefig( f"{output_folder}/global_eta_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
     plt.close()
 
+
+# Plots the current window for w(x) and vertical lines for xL ad xR.
+#Called during local model creation and stage 2.
 def save_trainable_window_plot(local_model, epoch):
     x_plot = torch.linspace(x_min, x_max, 2000).view(-1, 1).to(device)
     local_model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         w_plot = local_model.window(x_plot)
         xL_current, xR_current, beta_current = local_model.window_parameters()
 
@@ -427,15 +448,15 @@ def save_trainable_window_plot(local_model, epoch):
     plt.savefig( f"{output_folder}/window_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight" )
     plt.close()
 
-# x_snapshot 
-
+# u_snapshot is the solution just before enrichment starts. Obtained during LOCAL MODEL CREATION.
+# x_snapshot passed in as a discretization of the domain.
 def save_enriched_solution( epoch, global_model, local_model, xL, xR, u_snapshot=None, x_snapshot=None):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
 
     global_model.eval()
     local_model.eval()
 
-    with torch.no_grad():
+    with torch.inference_mode():
         u_pred = enriched_solution(x_test, global_model, local_model, xL, xR)
         u_exact = exact_solution(x_test)
 
@@ -479,6 +500,8 @@ def save_enriched_eta_plot( epoch, global_model, local_model, xL, xR, x_eta_snap
     plt.savefig( f"{output_folder}/enriched_eta_epoch_{epoch:05d}.png", dpi=150, box_inches="tight")
     plt.close()
 
+
+# plots the window.
 def save_window_plot(xL, xR):
     x_plot = torch.linspace(0.0, 1.0, 2000).view(-1, 1).to(device)
 
@@ -524,7 +547,7 @@ def save_checkpoint( checkpoint_path, global_model, local_model, optimizer, stag
 
     torch.save(checkpoint, checkpoint_path)
 
-
+# When you restart, this creates the local model.
 def create_local_model_from_checkpoint(checkpoint):
     state_dict = checkpoint["local_model_state_dict"]
 
@@ -672,7 +695,7 @@ if not restart_from_checkpoint: # not restarting from checkpoint means we are tr
 
         if epoch % save_every == 0: # print out whats happening+ Testing ( but only at certain points).
             global_model.eval()
-            with torch.no_grad():
+            with torch.inference_mode():
                 x_test = torch.linspace(x_min, x_max, 1000).view(-1, 1).to(device)
                 u_pred = global_model(x_test)
                 u_exact = exact_solution(x_test)
@@ -709,14 +732,19 @@ if not restart_from_checkpoint: # not restarting from checkpoint means we are tr
 
 
 # LOCAL MODEL CREATION
-if not restart_from_checkpoint: # This will be executed immediately after the global training whether stagnation was detected or not.
+# The code is set up such that stage 1 and stage 2 are run each time the code is run. 
+# We want to make sure that if we are starting from a check point, then we are starting from an old code. 
+# So we can avoid this local model creation. This is why the following is checking that.
+# It does 4 things -- (1) Creates the initial local window (2) Saves the global model prediction before enrichment.
+# (3) Instantiates the local model (4) Creates a new optimizer containing both global and local model parameters.
+if not restart_from_checkpoint: 
     print()
     print("=" * 60)
     print("CREATING LOCAL MODEL")
     print("=" * 60)
     print()
 
-    xL_init, xR_init = initial_local_window()
+    xL_init, xR_init = initial_local_window() # initial window creation.
     print("Initial local window guess:")
     print("xL_init =", xL_init)
     print("xR_init =", xR_init)
@@ -724,13 +752,14 @@ if not restart_from_checkpoint: # This will be executed immediately after the gl
 
     x_snapshot_sol_torch = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
     global_model.eval()
-    with torch.no_grad():
+    with torch.inference_mode(): # saving the u(x_snapshot) of the global model.
         u_snapshot = global_model(x_snapshot_sol_torch).cpu().numpy().flatten()
 
+    #Instantiate the local model.
     x_snapshot_sol = x_snapshot_sol_torch.cpu().numpy().flatten() # this will be passed as x_snapshot soln to save_enriched_solution.
     local_model = WindowedLocalPINN( xL_init=xL_init, xR_init=xR_init, beta_init=beta_init).to(device)
     project_window_parameters(local_model) # project xL and xR to within the domain.
-    optimizer = make_optimizer(global_model, local_model)
+    optimizer = make_optimizer(global_model, local_model) # point 4 above.
 
     save_trainable_window_plot(local_model, stage1_end_epoch)
 
@@ -774,7 +803,7 @@ for epoch in range(start_epoch_stage2, final_epoch_stage2):
         global_model.eval()
         local_model.eval()
 
-        with torch.no_grad():
+        with torch.inference_mode():
             x_test = torch.linspace(x_min, x_max, 1000).view(-1, 1).to(device)
             u_pred = enriched_solution(x_test, global_model, local_model)
             u_exact = exact_solution(x_test)
@@ -808,7 +837,7 @@ x_test = torch.linspace(x_min, x_max, 2000).view(-1, 1).to(device)
 global_model.eval()
 local_model.eval()
 
-with torch.no_grad():
+with torch.inference_mode():
     u_pred = enriched_solution(x_test, global_model, local_model)
     u_exact = exact_solution(x_test)
 relative_L2_error = torch.norm(u_exact - u_pred) / torch.norm(u_exact)
@@ -853,7 +882,7 @@ if n2 > 0:
 
 
 
-# Save Check point
+# Save Check point. Called during Local model creation and stage 2.
 save_checkpoint( checkpoint_path, global_model, local_model, optimizer, stage1_end_epoch, loss_history_stage1,
                  loss_history_stage2, x_snapshot_sol, u_snapshot)
 print()
