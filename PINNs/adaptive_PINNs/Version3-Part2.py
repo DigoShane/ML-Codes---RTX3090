@@ -267,7 +267,7 @@ def project_window_parameters(local_model):
     """
     Hard projection step.
     Keeps:
-        x_min <= xL <= x_max - min_width
+        0 <= xL <= 1 - min_width
         0 < width_fraction < 1
     """
 
@@ -433,7 +433,7 @@ def save_global_eta_plot(epoch, global_model):
 # Plots the current window for w(x) and vertical lines for xL ad xR.
 #Called during local model creation and stage 2.
 def save_trainable_window_plot(local_model, epoch):
-    x_plot = torch.linspace(x_min, x_max, 2000).view(-1, 1).to(device)
+    x_plot = torch.linspace(0, 1, 2000).view(-1, 1).to(device)
     local_model.eval()
     with torch.inference_mode():
         w_plot = local_model.window(x_plot)
@@ -686,7 +686,7 @@ if not restart_from_checkpoint: # not restarting from checkpoint means we are tr
         if epoch % save_every == 0: # print out whats happening+ Testing ( but only at certain points).
             global_model.eval()
             with torch.inference_mode():
-                x_test = torch.linspace(x_min, x_max, 1000).view(-1, 1).to(device)
+                x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
                 u_pred = global_model(x_test)
                 u_exact = exact_solution(x_test)
                 rel_error = torch.norm(u_exact - u_pred) / torch.norm(u_exact) 
@@ -795,7 +795,7 @@ for epoch in range(start_epoch_stage2, final_epoch_stage2):
         local_model.eval()
 
         with torch.inference_mode():
-            x_test = torch.linspace(x_min, x_max, 1000).view(-1, 1).to(device)
+            x_test = torch.linspace(0, 1, 1000).view(-1, 1).to(device)
             u_pred = enriched_solution(x_test, global_model, local_model)
             u_exact = exact_solution(x_test)
             rel_error = torch.norm(u_exact - u_pred) / torch.norm(u_exact)
@@ -824,7 +824,7 @@ for epoch in range(start_epoch_stage2, final_epoch_stage2):
 
 
 # FInal Error
-x_test = torch.linspace(x_min, x_max, 2000).view(-1, 1).to(device)
+x_test = torch.linspace(0, 1, 2000).view(-1, 1).to(device)
 global_model.eval()
 local_model.eval()
 
