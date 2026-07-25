@@ -114,10 +114,10 @@ learning_rate = float(input("Enter learning rate, e.g. 1e-4: "))
 
 if restart_from_checkpoint:
     epochs_stage1 = None
-    epochs_stage2 = int(input("Enter number of additional Stage 2 epochs: "))
+    additional_stage2_epochs = int(input("Enter number of additional Stage 2 epochs: "))
 else:
     epochs_stage1 = int(input("Enter maximum number of Stage 1 epochs: "))
-    epochs_stage2 = int(input("Enter number of Stage 2 epochs: "))
+    additional_stage2_epochs = int(input("Enter number of Stage 2 epochs: "))
 
 if os.path.exists(output_folder) and not restart_from_checkpoint:
     shutil.rmtree(output_folder)
@@ -144,8 +144,8 @@ window = 500 # over which stagnation is determined.
 stagnation_tol = 1e-3
 stagnation_loss_threshold = 1e-4
 
-hotspot_tau = 0.5
-hotspot_min_width = 0.10
+#hotspot_tau = 0.5
+#hotspot_min_width = 0.10
 
 beta_init = 100.0
 
@@ -161,12 +161,19 @@ x_global = torch.linspace(0.0, 1.0, N_f).view(-1, 1).to(device)
 x0 = torch.tensor([[0.0]], device=device)
 x1 = torch.tensor([[1.0]], device=device)
 
-
-def get_collocation_batch(x_pool, batch_size):
+def iter_collocation_batches(x_pool, batch_size, shuffle=True):
     if batch_size is None or batch_size >= x_pool.shape[0]:
-        return x_pool
-    idx = torch.randperm(x_pool.shape[0], device=x_pool.device)[:batch_size]
-    return x_pool[idx]
+        yield x_pool
+        return
+
+    if shuffle:
+        indices = torch.randperm(x_pool.shape[0], device=x_pool.device)
+    else:
+        indices = torch.arange(x_pool.shape[0], device=x_pool.device)
+
+    for start in range(0, x_pool.shape[0], batch_size):
+        batch_indices = indices[start:start + batch_size]
+        yield x_pool[batch_indices]
 
 # NN
 class PINN(nn.Module):
@@ -368,7 +375,7 @@ def enriched_loss(global_model, local_model, x_batch):
     loss_bc = torch.mean(u0**2) + torch.mean(u1**2) # both u0 and u1 should be 0.
     loss = loss_pde + loss_bc 
 
-    return loss, loss_pde, loss_bc, loss_window
+    return loss, loss_pde, loss_bc
 
 
 #residual indicator
@@ -459,14 +466,15 @@ def save_trainable_window_plot(local_model, epoch):
 
 # u_snapshot is the solution just before enrichment starts. Obtained during LOCAL MODEL CREATION.
 # x_snapshot passed in as a discretization of the domain.
-def save_enriched_solution( epoch, global_model, local_model, xL, xR, u_snapshot=None, x_snapshot=None):
+def save_enriched_solution( epoch, global_model, local_model, u_snapshot=None, x_snapshot=None):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
 
     global_model.eval()
     local_model.eval()
 
     with torch.inference_mode():
-        u_pred = enriched_solution(x_test, global_model, local_model, xL, xR)
+        u_pred = enriched_solution(x_test, global_model, local_model)
+        xL_current, xR_current, beta_current = local_model.window_parameters()
         u_exact = exact_solution(x_test)
 
     plt.figure(figsize=(8, 4))
@@ -476,8 +484,8 @@ def save_enriched_solution( epoch, global_model, local_model, xL, xR, u_snapshot
     if u_snapshot is not None and x_snapshot is not None:
         plt.plot( x_snapshot, u_snapshot, linestyle="--", linewidth=0.7, alpha=0.7, label="Global PINN at enrichment start")
 
-    plt.axvline(xL, color="black", linestyle=":", linewidth=0.8)
-    plt.axvline(xR, color="black", linestyle=":", linewidth=0.8)
+    plt.axvline(xL_current.item(), color="black", linestyle=":", linewidth=0.8)
+    plt.axvline(xR_current.item(), color="black", linestyle=":", linewidth=0.8)
     plt.xlabel("x")
     plt.ylabel("u(x)")
     plt.title(f"Enriched solution — Epoch {epoch}")
@@ -490,23 +498,28 @@ def save_enriched_solution( epoch, global_model, local_model, xL, xR, u_snapshot
 
 def save_enriched_eta_plot( epoch, global_model, local_model):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
-    r = enriched_residual(x_test, global_model, local_model, xL, xR)
+    r = enriched_residual(x_test, global_model, local_model)
     eta = residual_indicator_from_residual(r)
     x_np = x_test.detach().cpu().numpy().flatten()
+
+    local_model.eval()
+    with torch.inference_mode():
+        xL_current, xR_current, beta_current = local_model.window_parameters()
+
     plt.figure(figsize=(8, 4))
     plt.plot( x_np, eta, linewidth=0.8, label=r"Current $\eta=\log(r^2)$")
-    if x_eta_snapshot is not None and eta_snapshot is not None:
-        plt.plot( x_eta_snapshot, eta_snapshot, linestyle="--", linewidth=0.7, alpha=0.7, label=r"$\eta$ at enrichment start")
+    # if x_eta_snapshot is not None and eta_snapshot is not None:
+    #     plt.plot( x_eta_snapshot, eta_snapshot, linestyle="--", linewidth=0.7, alpha=0.7, label=r"$\eta$ at enrichment start")
     plt.axhline(0.0, color="black", linestyle="--", linewidth=0.6)
-    plt.axvline(xL, color="black", linestyle=":", linewidth=0.8)
-    plt.axvline(xR, color="black", linestyle=":", linewidth=0.8)
+    plt.axvline(xL_current.item(), color="black", linestyle=":", linewidth=0.8)
+    plt.axvline(xR_current.item(), color="black", linestyle=":", linewidth=0.8)
     plt.xlabel("x")
     plt.ylabel(r"$\eta(x)$")
     plt.title(f"Enriched residual indicator — Epoch {epoch}")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig( f"{output_folder}/enriched_eta_epoch_{epoch:05d}.png", dpi=150, box_inches="tight")
+    plt.savefig( f"{output_folder}/enriched_eta_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -547,7 +560,7 @@ def create_local_model_from_checkpoint(checkpoint):
     # Since we used "self.xL = nn.Parameter(torch.tensor([[xL_init]], ...))", it is now a parameter tracked by the dict.
     xL_loaded = state_dict["xL"].item() # .item() extracts std Python number out of the 0-dimensional PyTorch tensor.
     width_fraction_loaded = state_dict["width_fraction"].item()
-    xR_loaded = xL_loaded + width_fraction_loaded
+    xR_loaded = xL_loaded + (1 - xL_loaded) * width_fraction_loaded
     #creating a new model for the next re-run.
     local_model = WindowedLocalPINN( xL_init=xL_loaded, xR_init=xR_loaded, beta_init=beta_init).to(device)
     local_model.load_state_dict(state_dict)
@@ -675,13 +688,19 @@ if not restart_from_checkpoint: # not restarting from checkpoint means we are tr
 
     for epoch in range(epochs_stage1):
         global_model.train() # forward pass calculated via "u = global_model(x_req)" called via global_loss, which calls pde_residual, which contains this.
-        x_batch = get_collocation_batch(x_global, batch_size)
-        loss, loss_pde, loss_bc = global_loss(global_model, x_batch) 
-        optimizer.zero_grad() #?? This was initially above
-        loss.backward()
-        optimizer.step()
 
-        loss_history_stage1.append(loss.item()) # This is the testing loop since we are not doing supervised learning.
+        epoch_losses = []
+
+        for x_batch in iter_collocation_batches(x_global, batch_size):
+            loss, loss_pde, loss_bc = global_loss(global_model, x_batch) 
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            epoch_losses.append(loss.item())
+
+        mean_epoch_loss = float(np.mean(epoch_losses))
+        loss_history_stage1.append(mean_epoch_loss) # This is the testing loop since we are not doing supervised learning.
 
         if epoch % save_every == 0: # print out whats happening+ Testing ( but only at certain points).
             global_model.eval()
@@ -695,9 +714,7 @@ if not restart_from_checkpoint: # not restarting from checkpoint means we are tr
             print(
                 f"[GLOBAL] "
                 f"Epoch {epoch:6d} | "
-                f"Loss = {loss.item():.4e} | "
-                f"PDE = {loss_pde.item():.4e} | "
-                f"BC = {loss_bc.item():.4e} | "
+                f"Mean minibatch loss = {mean_epoch_loss:.4e} | "
                 f"RelL2 = {rel_error.item():.4e}")
 
             save_global_solution(epoch, global_model)
@@ -775,17 +792,28 @@ final_epoch_stage2 = start_epoch_stage2 + additional_stage2_epochs
 for epoch in range(start_epoch_stage2, final_epoch_stage2):
     global_model.train()
     local_model.train()
-    x_batch = get_collocation_batch(x_global, batch_size)
-    loss, loss_pde, loss_bc = enriched_loss(global_model, local_model, x_batch)
-    optimizer.zero_grad()
-    if torch.isnan(loss):
-        print("NaN detected during enriched training.")
-        break
-    loss.backward()
-    optimizer.step()
+    epoch_losses = []
 
-    project_window_parameters(local_model)
-    loss_history_stage2.append(loss.item())
+    nan_detected = False
+
+    for x_batch in iter_collocation_batches(x_global, batch_size):
+        loss, loss_pde, loss_bc = enriched_loss(global_model, local_model, x_batch)
+        optimizer.zero_grad()
+        if torch.isnan(loss):
+            print("NaN detected during enriched training.")
+            nan_detected = True
+            break
+        loss.backward()
+        optimizer.step()
+
+        project_window_parameters(local_model)
+        epoch_losses.append(loss.item())
+
+    if nan_detected:
+        break
+
+    mean_epoch_loss = float(np.mean(epoch_losses))
+    loss_history_stage2.append(mean_epoch_loss)
 
     total_epoch = stage1_end_epoch + epoch
 
@@ -806,9 +834,7 @@ for epoch in range(start_epoch_stage2, final_epoch_stage2):
             f"[ENRICHED] "
             f"Total epoch = {total_epoch:6d} | "
             f"Stage2 epoch = {epoch:6d} | "
-            f"Loss = {loss.item():.4e} | "
-            f"PDE = {loss_pde.item():.4e} | "
-            f"BC = {loss_bc.item():.4e} | "
+            f"Mean minibatch loss = {mean_epoch_loss:.4e} | "
             f"RelL2 = {rel_error.item():.4e} | "
             f"xL = {xL_current.item():.4f} | "
             f"xR = {xR_current.item():.4f} | "
