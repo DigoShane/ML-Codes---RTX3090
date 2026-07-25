@@ -343,7 +343,7 @@ def global_residual(global_model, x):
     u = global_model(x_req)
     _, u_xx = derivatives_from_output(u, x_req)
 
-    return -u_xx - helmholtz_k**2 * u - forcing(x_req)
+    return -u_xx - helmholtz_k**2 * u - forcing(x_req), x_req
 
 def enriched_solution(x, global_model, local_model):
     return global_model(x) + local_model(x)
@@ -354,12 +354,12 @@ def enriched_residual(x, global_model, local_model):
     u = enriched_solution(x_req, global_model, local_model)
     _, u_xx = derivatives_from_output(u, x_req)
 
-    return -u_xx - helmholtz_k**2 * u - forcing(x_req)
+    return -u_xx - helmholtz_k**2 * u - forcing(x_req), x_req
 
 
 # Loss Fn
 def global_loss(global_model, x_batch):
-    r = global_residual(global_model, x_batch)
+    r, _ = global_residual(global_model, x_batch)
     loss_pde = torch.mean(r**2)
     loss_bc = ( torch.mean(global_model(x0)**2) + torch.mean(global_model(x1)**2) )
     loss = loss_pde + loss_bc
@@ -368,7 +368,7 @@ def global_loss(global_model, x_batch):
 
 
 def enriched_loss(global_model, local_model, x_batch):
-    r = enriched_residual(x_batch, global_model, local_model)
+    r, _ = enriched_residual(x_batch, global_model, local_model)
     loss_pde = torch.mean(r**2)
     u0 = enriched_solution(x0, global_model, local_model)
     u1 = enriched_solution(x1, global_model, local_model)
@@ -379,12 +379,11 @@ def enriched_loss(global_model, local_model, x_batch):
 
 
 #residual indicator
-def residual_indicator_from_residual(r):
+def residual_indicator_from_residual(r, x_req):
     r_sq = r.detach()**2
-    # commented out. Choose one or the other.
-    #grad_r = torch.autograd.grad( r, x, grad_outputs=torch.ones_like(r), create_graph=False, retain_graph=True)[0]
-    grad_r_sq = 0 # grad_r.detach()**2
-    eta = r_sq + grad_r_sq 
+    grad_r = torch.autograd.grad( r, x_req, grad_outputs=torch.ones_like(r), create_graph=False, retain_graph=False)[0]
+    grad_r_sq = (grad_r**2).detach()
+    eta = r_sq + grad_r_sq
     
     eta = eta.cpu().numpy().flatten()
     eta = np.log(eta + 1e-12)
@@ -419,8 +418,8 @@ def save_global_solution(epoch, global_model):
 def save_global_eta_plot(epoch, global_model):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
 
-    r = global_residual(global_model, x_test)
-    eta = residual_indicator_from_residual(r)
+    r, x_req = global_residual(global_model, x_test)
+    eta = residual_indicator_from_residual(r, x_req)
 
     x_np = x_test.detach().cpu().numpy().flatten()
 
@@ -498,8 +497,8 @@ def save_enriched_solution( epoch, global_model, local_model, u_snapshot=None, x
 
 def save_enriched_eta_plot( epoch, global_model, local_model):
     x_test = torch.linspace(0.0, 1.0, 1000).view(-1, 1).to(device)
-    r = enriched_residual(x_test, global_model, local_model)
-    eta = residual_indicator_from_residual(r)
+    r, x_req = enriched_residual(x_test, global_model, local_model)
+    eta = residual_indicator_from_residual(r, x_req)
     x_np = x_test.detach().cpu().numpy().flatten()
 
     local_model.eval()
