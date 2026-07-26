@@ -119,12 +119,23 @@ else:
     epochs_stage1 = int(input("Enter maximum number of Stage 1 epochs: "))
     additional_stage2_epochs = int(input("Enter number of Stage 2 epochs: "))
 
+
+# Folder creation
 if os.path.exists(output_folder) and not restart_from_checkpoint:
     shutil.rmtree(output_folder)
 
 os.makedirs(output_folder, exist_ok=True)
 
-checkpoint_path = f"{output_folder}/checkpoint.pt"
+# Separate output folders
+solution_folder = os.path.join(output_folder, "solution_plots")
+residual_folder = os.path.join(output_folder, "residual_plots")
+window_folder = os.path.join(output_folder, "window_plots")
+
+for folder in [ solution_folder, residual_folder, window_folder]:
+    os.makedirs(folder, exist_ok=True)
+
+checkpoint_path = os.path.join(output_folder, "checkpoint.pt")
+
 
 # Problem defn.
 omega = 15
@@ -410,7 +421,7 @@ def save_global_solution(epoch, global_model):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig( f"{output_folder}/global_solution_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
+    plt.savefig( os.path.join(solution_folder, f"global_solution_epoch_{epoch:05d}.png"), dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -432,7 +443,7 @@ def save_global_eta_plot(epoch, global_model):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig( f"{output_folder}/global_eta_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
+    plt.savefig( os.path.join(residual_folder, f"global_eta_epoch_{epoch:05d}.png"), dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -460,7 +471,7 @@ def save_trainable_window_plot(local_model, epoch):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig( f"{output_folder}/window_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight" )
+    plt.savefig( os.path.join(window_folder, f"window_epoch_{epoch:05d}.png"), dpi=150, bbox_inches="tight")
     plt.close()
 
 # u_snapshot is the solution just before enrichment starts. Obtained during LOCAL MODEL CREATION.
@@ -491,7 +502,7 @@ def save_enriched_solution( epoch, global_model, local_model, u_snapshot=None, x
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig( f"{output_folder}/enriched_solution_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
+    plt.savefig( os.path.join(solution_folder, f"enriched_solution_epoch_{epoch:05d}.png"), dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -518,7 +529,7 @@ def save_enriched_eta_plot( epoch, global_model, local_model):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig( f"{output_folder}/enriched_eta_epoch_{epoch:05d}.png", dpi=150, bbox_inches="tight")
+    plt.savefig( os.path.join(residual_folder, f"enriched_eta_epoch_{epoch:05d}.png"), dpi=150, bbox_inches="tight")
     plt.close()
 
 
@@ -544,7 +555,8 @@ def save_checkpoint( checkpoint_path, global_model, local_model, optimizer, stag
                     "optimizer_state_dict": optimizer.state_dict(), "checkpoint_optimizer_type": optimizer_type,
                     "checkpoint_learning_rate": learning_rate, "stage1_end_epoch": stage1_end_epoch,
                     "loss_history_stage1": loss_history_stage1, "loss_history_stage2": loss_history_stage2,
-                    "x_snapshot_sol": x_snapshot_sol, "u_snapshot": u_snapshot}
+                    "x_snapshot_sol": None if x_snapshot_sol is None else x_snapshot_sol.tolist(),
+                    "u_snapshot": None if u_snapshot is None else u_snapshot.tolist()}
 
     torch.save(checkpoint, checkpoint_path)
 
@@ -575,7 +587,6 @@ def create_local_model_from_checkpoint(checkpoint):
 #                                      it's loaded, overriding whatever device it was originally saved on — ensuring the loaded 
 #                                      checkpoint always lands correctly on whatever device your current script is using 
 #                                      (CPU or GPU), regardless of where it was originally saved. 
-
 def load_checkpoint_models(checkpoint_path, global_model):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     global_model.load_state_dict(checkpoint["global_model_state_dict"])
@@ -585,6 +596,11 @@ def load_checkpoint_models(checkpoint_path, global_model):
     loss_history_stage2 = checkpoint["loss_history_stage2"]
     x_snapshot_sol = checkpoint["x_snapshot_sol"]
     u_snapshot = checkpoint["u_snapshot"]
+    #converting x_snapshot_sol and u_snapshot to np.
+    if x_snapshot_sol is not None:
+        x_snapshot_sol = np.array(x_snapshot_sol)
+    if u_snapshot is not None:
+        u_snapshot = np.array(u_snapshot)
 
     return ( checkpoint, local_model, stage1_end_epoch, loss_history_stage1, loss_history_stage2,
              x_snapshot_sol, u_snapshot)
