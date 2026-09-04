@@ -3,3 +3,7 @@ bandgap_active_learning_project_writeup.txt
 *.png
 
 *.txt
+
+*.pt
+
+/*.pt
