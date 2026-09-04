@@ -144,7 +144,7 @@ print("--------------------------------------------------------------------")
 # TRAINING PARAMETERS
 # ============================================================
 N_f = int(input("Enter no. of Collocation points: "))
-save_every = 100
+save_every = int(input("Save plots every: "))
 
 # The stagnation test compares two consecutive blocks of this length.
 stagnation_tol = float( input("Enter stagnation tolerance, e.g. 1e-3: ") )
