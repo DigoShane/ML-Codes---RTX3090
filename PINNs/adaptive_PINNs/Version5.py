@@ -1,4 +1,21 @@
-#This is version 4, except beta is fixed. 
+# VERSION 5
+# Manual checkpoint-driven enrichment.
+#
+# Fresh run:
+#   Train only the global PINN (Stage 1). When stagnation is detected,
+#   save a checkpoint and stop.
+#
+# Restart:
+#   Load the previous global/local models, report all existing windows
+#   and their current xL/xR values, and ask whether new windows should
+#   be added. The user supplies the initial xL/xR of each new window.
+#   All window locations remain trainable.
+#
+# Enriched training:
+#   Train global + all local models using physical loss + overlap loss.
+#   When stagnation is detected, save a checkpoint and stop. No window
+#   is ever introduced automatically.
+
 
 import os
 import shutil
@@ -25,7 +42,7 @@ print("Using device:", device)
 batch_choice = input( "Enter minibatch size (or press Enter for full-batch): ").strip()
 batch_size = int(batch_choice) if batch_choice else None
 
-output_folder = "Version4_continuous_windows"
+output_folder = "Version5_manual_enrichment"
 
 restart_choice = input("Restart from checkpoint? Enter yes or no: ").lower()
 
@@ -59,10 +76,12 @@ learning_rate = float(input("Enter learning rate, e.g. 1e-4: "))
 
 if restart_from_checkpoint:
     epochs_stage1 = None
-    additional_stage2_epochs = int( input("Enter number of additional Stage 2 epochs: "))
+    additional_stage2_epochs = int(
+        input("Enter maximum number of epochs for this restarted training run: ")
+    )
 else:
     epochs_stage1 = int(input("Enter maximum number of Stage 1 epochs: "))
-    additional_stage2_epochs = int(input("Enter number of Stage 2 epochs: "))
+    additional_stage2_epochs = 0
 
 stagnation_window = int(input("Enter Stagnation check window size:"))
 
@@ -151,17 +170,14 @@ save_every = int(input("Save plots every: "))
 stagnation_tol = float( input("Enter stagnation tolerance, e.g. 1e-3: ") )
 stagnation_loss_threshold = 1e-4
 
-# VERSION 4 ADDITION:
-maximum_number_of_windows = 10
-
+# VERSION 5:
+# beta remains fixed, while xL and xR remain trainable.
 beta_init = 100.0
 
-# Each new window starts from this broad trainable initial guess.
-initial_window_left_fraction = 0.10
-initial_window_right_fraction = 0.90
-
-#This is used to control how strongly overlap is discouraged.
-overlap_weight = float(input("Enter the weight associated with the window overlap function:"))
+# This controls how strongly overlap between trainable windows is discouraged.
+overlap_weight = float(
+    input("Enter the weight associated with the window overlap function:")
+)
 
 # ============================================================
 # COLLOCATION AND BOUNDARY POINTS
@@ -245,7 +261,7 @@ class WindowedLocalPINN(nn.Module):
             nn.Linear(64, 1),
         )
 
-        # VERSION 4 ADDITION:
+        # VERSION 5:
         # A newly added correction starts at exactly zero. Therefore, adding a
         # new window does not instantaneously change the current solution.
         nn.init.zeros_(self.net[-1].weight)
@@ -309,21 +325,16 @@ def project_all_window_parameters(local_models):
         project_window_parameters(local_model)
 
 
-def initial_local_window():
-    xL_init = initial_window_left_fraction
-    xR_init = initial_window_right_fraction
-
-    if xR_init <= xL_init:
-        raise ValueError( "Initial local window must satisfy xR_init > xL_init.")
-
-    return xL_init, xR_init
-
-
-# VERSION 4 ADDITION:
-def create_new_local_model():
-    xL_init, xR_init = initial_local_window()
-
-    local_model = WindowedLocalPINN( xL_init=xL_init, xR_init=xR_init, beta_init=beta_init).to(device)
+# VERSION 5:
+# xL_init and xR_init are supplied by the user when a new window is added.
+# They are only INITIAL values. xL and width_fraction remain nn.Parameters,
+# so xL and xR continue to move during training.
+def create_new_local_model(xL_init, xR_init):
+    local_model = WindowedLocalPINN(
+        xL_init=xL_init,
+        xR_init=xR_init,
+        beta_init=beta_init
+    ).to(device)
 
     project_window_parameters(local_model)
     return local_model
@@ -367,7 +378,7 @@ def add_local_model_to_optimizer(optimizer, local_model):
 print()
 print("Optimizer:", optimizer_type)
 print("Learning rate:", learning_rate)
-print("Maximum number of local windows:", maximum_number_of_windows)
+print("Window enrichment mode: manual, only on restart")
 print()
 
 
@@ -767,11 +778,9 @@ print("Save every:", save_every)
 print("Stagnation window:", stagnation_window)
 print("Stagnation tolerance:", stagnation_tol)
 print("Stagnation loss threshold:", stagnation_loss_threshold)
-print("Maximum number of windows:", maximum_number_of_windows)
+print("Window enrichment mode: manual, only on restart")
 print("Fixed beta:", beta_init)
 print("Overlap weight:", overlap_weight)
-print("Initial window left:", initial_window_left_fraction)
-print("Initial window right:", initial_window_right_fraction)
 
 print("=" * 60)
 print()
@@ -805,29 +814,187 @@ u_snapshot = None
 # ============================================================
 if restart_from_checkpoint:
     if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError( f"No checkpoint found at: {checkpoint_path}")
-    
-    ( checkpoint, local_models, stage1_end_epoch, loss_history_stage1, loss_history_stage2, stagnation_history,
-    component_history, window_creation_epochs, x_snapshot_sol, u_snapshot ) = load_checkpoint_models(checkpoint_path, global_model)
+        raise FileNotFoundError(f"No checkpoint found at: {checkpoint_path}")
+
+    (
+        checkpoint,
+        local_models,
+        stage1_end_epoch,
+        loss_history_stage1,
+        loss_history_stage2,
+        stagnation_history,
+        component_history,
+        window_creation_epochs,
+        x_snapshot_sol,
+        u_snapshot,
+    ) = load_checkpoint_models(checkpoint_path, global_model)
+
+    # First reconstruct the optimizer for exactly the models that existed
+    # in the checkpoint. This allows an old optimizer state to be restored.
+    optimizer = make_optimizer(global_model, local_models)
+    maybe_load_optimizer_state(checkpoint, optimizer, load_optimizer_state)
+
+    print()
+    print("=" * 60)
+    print("PREVIOUS CHECKPOINT STATE")
+    print("=" * 60)
 
     if len(local_models) == 0:
-        raise RuntimeError(
-            "Checkpoint does not contain any local model. "
-            "Restart is supported only after enrichment begins."
+        print("Previous model: GLOBAL PINN ONLY")
+        print("Existing local windows: 0")
+    else:
+        print(
+            f"Previous model: GLOBAL PINN + {len(local_models)} local window(s)"
         )
 
-    optimizer = make_optimizer(global_model, local_models)
-    maybe_load_optimizer_state( checkpoint, optimizer, load_optimizer_state)
+        for index, local_model in enumerate(local_models):
+            xL, xR, beta = local_model.window_parameters()
+            print(
+                f"    Existing window {index + 1}: "
+                f"xL={xL.item():.6f}, "
+                f"xR={xR.item():.6f}, "
+                f"beta={beta.item():.2f}"
+            )
+
+    print("=" * 60)
+    print()
+
+    add_windows_choice = input(
+        "Do you want to add more local windows? Enter yes or no: "
+    ).strip().lower()
+
+    if add_windows_choice in ["yes", "y"]:
+        number_of_new_windows = int(
+            input("How many NEW local windows do you want to add? ")
+        )
+
+        if number_of_new_windows < 1:
+            raise ValueError("Number of new windows must be at least 1.")
+
+        # Store the solution immediately before this enrichment event.
+        x_snapshot_sol, u_snapshot = take_solution_snapshot(
+            global_model, local_models
+        )
+
+        creation_epoch = (
+            len(loss_history_stage1)
+            + len(loss_history_stage2)
+        )
+
+        print()
+        print("Enter the INITIAL location of each new window.")
+        print("These locations remain trainable during Stage 2.")
+        print()
+
+        for new_index in range(number_of_new_windows):
+            window_number = len(local_models) + 1
+
+            xL_init = float(
+                input(
+                    f"Enter initial xL for new window {window_number}: "
+                )
+            )
+            xR_init = float(
+                input(
+                    f"Enter initial xR for new window {window_number}: "
+                )
+            )
+
+            if not (0.0501 <= xL_init < xR_init <= 0.9499):
+                raise ValueError(
+                    "Each new window must satisfy "
+                    "0.0501 <= xL < xR <= 0.9499."
+                )
+
+            new_local_model = create_new_local_model(
+                xL_init=xL_init,
+                xR_init=xR_init
+            )
+
+            local_models.append(new_local_model)
+            add_local_model_to_optimizer(
+                optimizer,
+                new_local_model
+            )
+
+            window_creation_epochs.append(
+                creation_epoch
+            )
+
+            xL, xR, beta = new_local_model.window_parameters()
+
+            print(
+                f"Created local window {window_number}: "
+                f"xL={xL.item():.6f}, "
+                f"xR={xR.item():.6f}, "
+                f"beta={beta.item():.2f}"
+            )
+
+        print()
+        print(
+            "New local corrections were initialized to zero, "
+            "so adding them did not instantaneously change the solution."
+        )
+
+    elif add_windows_choice in ["no", "n"]:
+        number_of_new_windows = 0
+        print()
+        print("No new local windows were added.")
+
+    else:
+        raise ValueError("Choice must be yes or no.")
+
+    # Every restarted training run gets a fresh stagnation interval.
+    stagnation_history = deque(
+        maxlen=stagnation_window + 1
+    )
+
+    if len(local_models) == 0:
+        print()
+        print(
+            "The checkpoint contains only the global PINN and no new "
+            "window was added."
+        )
+        print(
+            "There is no enriched Stage 2 model to train. "
+            "Exiting without changing the checkpoint."
+        )
+        print()
+
+        sys.stdout = sys.stdout.terminal
+        log_file.close()
+        sys.exit(0)
+
+    # Save immediately after manually adding windows, before long training.
+    save_checkpoint(
+        checkpoint_path,
+        global_model,
+        local_models,
+        optimizer,
+        stage1_end_epoch,
+        loss_history_stage1,
+        loss_history_stage2,
+        stagnation_history,
+        window_creation_epochs,
+        x_snapshot_sol,
+        u_snapshot
+    )
 
     print()
     print("Restarted from checkpoint.")
     print("Continuing enriched training.")
     print("Optimizer:", optimizer_type)
     print("Learning rate:", learning_rate)
-    print("Existing local windows:", len(local_models))
+    print("Current local windows:", len(local_models))
     print("Existing Stage 2 epochs:", len(loss_history_stage2))
-    print( "Losses collected toward next stagnation check:", len(stagnation_history) )
-    print( "Additional Stage 2 epochs requested:", additional_stage2_epochs)
+    print(
+        "Fresh stagnation samples for this run:",
+        len(stagnation_history)
+    )
+    print(
+        "Maximum epochs requested for this run:",
+        additional_stage2_epochs
+    )
     print()
 
 else:
@@ -904,45 +1071,49 @@ if not restart_from_checkpoint:
 
     if not stagnation_detected:
         print()
-        print("Stage 1 reached its maximum epoch count.")
-        print("Introducing the first local model anyway.")
+        print("Stage 1 reached its maximum epoch count before stagnation.")
         print()
 
+    # VERSION 5:
+    # A fresh run NEVER introduces a local model automatically.
+    # Save the global-only state and stop. The next run can restart
+    # from this checkpoint and manually add one or more windows.
+    save_checkpoint(
+        checkpoint_path,
+        global_model,
+        local_models,
+        optimizer,
+        stage1_end_epoch,
+        loss_history_stage1,
+        loss_history_stage2,
+        stagnation_history,
+        window_creation_epochs,
+        x_snapshot_sol,
+        u_snapshot
+    )
 
-# ============================================================
-# CREATE FIRST LOCAL WINDOW
-# ============================================================
-if not restart_from_checkpoint:
-    if maximum_number_of_windows < 1:
-        raise ValueError( "maximum_number_of_windows must be at least 1.")
-
-    print()
     print("=" * 60)
-    print("CREATING LOCAL WINDOW 1")
+    print("STAGE 1 STOPPED")
     print("=" * 60)
+
+    if stagnation_detected:
+        print("Reason: global physical loss stagnated.")
+    else:
+        print("Reason: maximum Stage 1 epoch count was reached.")
+
+    print("Global-only checkpoint saved at:")
+    print(checkpoint_path)
     print()
+    print(
+        "Run Version 5 again with restart=yes. "
+        "The code will show the previous model and ask whether "
+        "you want to add local windows."
+    )
+    print("=" * 60)
 
-    # Snapshot of the global solution immediately before enrichment.
-    x_snapshot_sol, u_snapshot = take_solution_snapshot( global_model, local_models)
-    new_local_model = create_new_local_model()
-    local_models.append(new_local_model)
-    add_local_model_to_optimizer( optimizer, new_local_model)
-    first_creation_epoch = len(loss_history_stage1)
-    window_creation_epochs.append(first_creation_epoch)
-
-    # VERSION 4 CHANGE:
-    stagnation_history = deque( maxlen=stagnation_window + 1 )
-
-    xL, xR, beta = new_local_model.window_parameters()
-    print("Created local window 1")
-    print("Initial xL =", xL.item())
-    print("Initial xR =", xR.item())
-    print("Initial beta =", beta.item())
-    print()
-
-    save_all_windows_plot( local_models, first_creation_epoch)
-    save_checkpoint( checkpoint_path, global_model, local_models, optimizer, stage1_end_epoch, loss_history_stage1, 
-                     loss_history_stage2, stagnation_history, window_creation_epochs, x_snapshot_sol, u_snapshot)
+    sys.stdout = sys.stdout.terminal
+    log_file.close()
+    sys.exit(0)
 
 
 # ============================================================
@@ -950,7 +1121,7 @@ if not restart_from_checkpoint:
 # ============================================================
 print()
 print("=" * 60)
-print("STAGE 2: CONTINUOUSLY ENRICHED TRAINING")
+print("STAGE 2: MANUALLY ENRICHED TRAINING")
 print("=" * 60)
 print()
 
@@ -1038,12 +1209,12 @@ for epoch in range(start_epoch_stage2, final_epoch_stage2):
         
         if change is not None:
             print(
-                    f"Stagnation improvement = {change:.6e} "
+                    f"Stagnation absolute change = {change:.6e} "
                     f"| tolerance = {stagnation_tol:.6e}"
                 )
         else:
             print(
-                    f"Stagnation improvement = N/A "
+                    f"Stagnation absolute change = N/A "
                     f"| need {1 + stagnation_window} samples"
                  )
 
@@ -1063,47 +1234,78 @@ for epoch in range(start_epoch_stage2, final_epoch_stage2):
                          loss_history_stage2, stagnation_history, window_creation_epochs, x_snapshot_sol, u_snapshot)
 
     # ========================================================
-    # VERSION 4 CHANGE: REPEATED STAGNATION-DRIVEN ENRICHMENT
+    # VERSION 5: STAGNATION STOPS THE RUN.
+    # NO WINDOW IS ADDED AUTOMATICALLY.
     # ========================================================
-    if ( len(local_models) < maximum_number_of_windows and stagnated ):
+    if stagnated:
         print()
+        print("=" * 60)
         print("STAGNATION DETECTED DURING ENRICHED TRAINING")
-        print( f"Stagnation absolute change = {change:.6e} | tolerance = {stagnation_tol:.6e}" )
-        print( "Introducing local window", len(local_models) + 1)
-        print()
-
-        x_snapshot_sol, u_snapshot = take_solution_snapshot( global_model, local_models)
-        new_local_model = create_new_local_model()
-        local_models.append(new_local_model)
-        add_local_model_to_optimizer( optimizer, new_local_model)
-
-        creation_epoch = ( len(loss_history_stage1) + len(loss_history_stage2))
-        window_creation_epochs.append(creation_epoch)
-
-        stagnation_history = deque( maxlen=stagnation_window + 1)
-        xL, xR, beta = new_local_model.window_parameters()
+        print("=" * 60)
         print(
-            f"Created local window {len(local_models)} at "
-            f"loss-history epoch {creation_epoch}."
-        )
-        print(
-            f"Initial parameters: "
-            f"xL={xL.item():.4f}, "
-            f"xR={xR.item():.4f}, "
-            f"beta={beta.item():.2f}"
-        )
-        print(
-            "The new local correction was initialized to zero, "
-            "so the current solution was preserved."
+            f"Stagnation absolute change = {change:.6e} "
+            f"| tolerance = {stagnation_tol:.6e}"
         )
         print()
+        print("Current trained window locations:")
 
-        save_enriched_solution( creation_epoch, global_model, local_models, u_snapshot=u_snapshot, x_snapshot=x_snapshot_sol)
-        save_enriched_eta_plot( creation_epoch, global_model, local_models)
-        save_all_windows_plot( local_models, creation_epoch)
+        for index, local_model in enumerate(local_models):
+            xL, xR, beta = local_model.window_parameters()
+            print(
+                f"    Window {index + 1}: "
+                f"xL={xL.item():.6f}, "
+                f"xR={xR.item():.6f}, "
+                f"beta={beta.item():.2f}"
+            )
 
-        save_checkpoint( checkpoint_path, global_model, local_models, optimizer, stage1_end_epoch, loss_history_stage1,
-                         loss_history_stage2, stagnation_history, window_creation_epochs, x_snapshot_sol, u_snapshot)
+        print()
+        print("Version 5 will NOT introduce another window automatically.")
+
+        save_enriched_solution(
+            total_epoch,
+            global_model,
+            local_models,
+            u_snapshot=u_snapshot,
+            x_snapshot=x_snapshot_sol
+        )
+        save_enriched_eta_plot(
+            total_epoch,
+            global_model,
+            local_models
+        )
+        save_all_windows_plot(
+            local_models,
+            total_epoch
+        )
+
+        save_checkpoint(
+            checkpoint_path,
+            global_model,
+            local_models,
+            optimizer,
+            stage1_end_epoch,
+            loss_history_stage1,
+            loss_history_stage2,
+            stagnation_history,
+            window_creation_epochs,
+            x_snapshot_sol,
+            u_snapshot
+        )
+
+        print()
+        print("Checkpoint saved at:")
+        print(checkpoint_path)
+        print()
+        print(
+            "Run Version 5 again with restart=yes. "
+            "The code will show these windows and ask whether "
+            "you want to add more."
+        )
+        print("=" * 60)
+
+        sys.stdout = sys.stdout.terminal
+        log_file.close()
+        sys.exit(0)
 
 
 # ============================================================
@@ -1152,7 +1354,7 @@ for index, creation_epoch in enumerate(window_creation_epochs):
 plt.yscale("log")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
-plt.title("Loss history with repeated local enrichment")
+plt.title("Loss history with manual checkpoint-driven enrichment")
 plt.legend(loc="upper right")
 plt.grid(True)
 plt.tight_layout()
@@ -1271,13 +1473,11 @@ print("Stagnation window:", stagnation_window)
 print("Stagnation tolerance:", stagnation_tol)
 print("Stagnation loss threshold:", stagnation_loss_threshold)
 
-print("Maximum number of windows:", maximum_number_of_windows)
+print("Window enrichment mode: manual, only on restart")
 
 print("Fixed beta:", beta_init)
 print("Overlap weight:", overlap_weight)
 
-print("Initial window left:", initial_window_left_fraction)
-print("Initial window right:", initial_window_right_fraction)
 
 print()
 print("ACTUAL RUN RESULTS")

@@ -51,3 +51,6 @@ Candidate decomposition evaluation.
 
 ## Version 4
 Recursive adaptive refinement.
+
+## Version 5
+HEre the code tells me when it stagnates and allows me to introduce the location of the windows. The windows move during training.
